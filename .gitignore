@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+
+# Local environment files, if added later
+.env
+.env.*
+
+# Optional editor and OS artifacts
+.idea/
+.vscode/
+*.swp

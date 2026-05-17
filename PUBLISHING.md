@@ -20,10 +20,13 @@ Use this checklist before every push or release.
 
 ## Suggested Checks
 
-```bash
-rg -n --hidden -S "(api[_-]?key|secret|token|password|passwd|BEGIN .*PRIVATE KEY|ghp_|xox[baprs]-|sk-)" .
-rg -n --hidden -S "(/Users/|/home/|C:\\\\Users\\\\|Documents/|Desktop/|Bearer )" .
-```
+Before publishing, search the tracked files for:
+
+- Real API credentials, tokens, passwords, private keys, or bearer credentials
+- Absolute local filesystem paths or machine-specific usernames
+- Exported report bundles, screenshots, recordings, or logs
+
+Prefer running both broad text searches and a manual `git diff --cached` review before every public push.
 
 ## Release Rule
 

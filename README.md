@@ -1,0 +1,56 @@
+# Screenshot2Bug
+
+Chrome MV3 extension for founders and product teams to capture screenshot or video bug reports with page context, console errors, browser details, typed repro steps, and AI-generated Markdown.
+
+## Install In Chrome
+
+### Option 1: Load the repo directly
+
+1. Open `chrome://extensions`
+2. Enable Developer mode
+3. Click Load unpacked
+4. Select this repository folder
+
+This path is useful for development and quick testing because the repo root includes a directly loadable extension.
+
+### Option 2: Build and load `dist/`
+
+Install dependencies, then build the extension:
+
+```bash
+npm install
+npm run build
+```
+
+Load `dist/` as an unpacked extension from `chrome://extensions`.
+
+## Permissions
+
+Screenshot2Bug requests Chrome extension permissions for:
+
+- Capturing the active tab screenshot or recording
+- Reading page metadata and console events from the active page
+- Saving reports and drafts in local extension storage
+- Downloading ZIP exports
+- Calling the OpenAI API when the user supplies an API key
+
+No OpenAI API key is bundled with the extension. Users add their own key from the extension settings page. If no key is configured, Screenshot2Bug generates a structured template report locally.
+
+## Capture Modes
+
+- New screenshot report: popup button or `Option+Shift+S`
+- Attach screenshot to current report: popup button or `Control+Shift+S`
+- New video report: popup button or `Option+Shift+V`
+- Attach video to current report: popup button or `Control+Shift+V`
+
+Chrome users can remap these shortcuts at `chrome://extensions/shortcuts`.
+
+Reports stay in local extension storage until removed by a future cleanup feature. The popup lists previous reports so drafts can be reopened, and **Download ZIP** exports `report.md`, `metadata.json`, plus attached screenshot/video files.
+
+## AI Reports
+
+Open the extension settings page and save an OpenAI API key. If no key is saved, Screenshot2Bug still creates a structured Markdown template report from the captured context.
+
+## Test Page
+
+The repository includes `test-error-page.html`, a local fixture that intentionally creates console errors so extension capture can be tested.

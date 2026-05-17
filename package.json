@@ -1,0 +1,17 @@
+{
+  "name": "screenshot2bug",
+  "version": "0.1.0",
+  "description": "Chrome extension for capturing screenshots, videos, browser context, and AI-generated bug reports.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.34",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  }
+}

@@ -21,8 +21,7 @@ Thumbs.db
 
 *.pem
 *.key
-id_ed25519*
-id_rsa*
+id_*
 
 screenshot2bug-*.md
 screenshot2bug-*.json

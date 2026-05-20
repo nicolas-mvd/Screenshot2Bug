@@ -76,6 +76,16 @@ export interface CaptureSession {
 export interface Settings {
   openaiApiKey?: string;
   openaiModel?: string;
+  githubClientId?: string;
+  githubAccessToken?: string;
+  githubUserLogin?: string;
+  githubSelectedRepo?: {
+    owner: string;
+    name: string;
+    fullName: string;
+    private?: boolean;
+  };
+  githubDefaultLabels?: string[];
 }
 
 export interface BackgroundResponse<T = unknown> {

@@ -22,7 +22,12 @@
     "offscreen",
     "unlimitedStorage"
   ],
-  "host_permissions": ["<all_urls>", "https://api.openai.com/*"],
+  "host_permissions": [
+    "<all_urls>",
+    "https://api.openai.com/*",
+    "https://api.github.com/*",
+    "https://github.com/*"
+  ],
   "commands": {
     "capture-screenshot": {
       "suggested_key": {

@@ -3,6 +3,7 @@ import { buildTemplateReport, generateAiReport } from "../shared/report";
 import { getSettings, getSortedSessions } from "../shared/storage";
 import { DEFAULT_MODEL } from "../shared/types";
 import { buildReportZip } from "../shared/zip";
+import { buildGitHubIssue, createGitHubIssue } from "../shared/github";
 import type {
   BackgroundResponse,
   CaptureSession,
@@ -19,6 +20,7 @@ let notes = "";
 let report = "";
 let busyLabel = "";
 let statusMessage = "";
+let githubStatusMessage = "";
 let pollHandle: number | undefined;
 
 void init();
@@ -151,6 +153,13 @@ function renderSession(current: CaptureSession): string {
       <button id="copyButton" ${!report ? "disabled" : ""}>Copy Markdown</button>
       <button id="downloadButton" ${!report ? "disabled" : ""}>Download ZIP</button>
     </div>
+
+    <section class="panel">
+      <h2>GitHub issue</h2>
+      ${githubStatusMessage ? `<p class="notice">${escapeHtml(githubStatusMessage)}</p>` : ""}
+      <p class="muted">${renderGitHubHelp()}</p>
+      <button class="primary" id="createGitHubIssueButton" ${!report || busyLabel ? "disabled" : ""}>Create GitHub issue</button>
+    </section>
   `;
 }
 
@@ -245,6 +254,7 @@ function bindEvents(): void {
   document.querySelector("#aiButton")?.addEventListener("click", () => void generateReport());
   document.querySelector("#copyButton")?.addEventListener("click", () => void copyReport());
   document.querySelector("#downloadButton")?.addEventListener("click", () => void downloadBundle());
+  document.querySelector("#createGitHubIssueButton")?.addEventListener("click", () => void createIssue());
   document.querySelectorAll("[data-open-session]").forEach((button) => {
     button.addEventListener("click", () => {
       const sessionId = button.getAttribute("data-open-session");
@@ -365,6 +375,40 @@ async function downloadBundle(): Promise<void> {
   render();
 }
 
+async function createIssue(): Promise<void> {
+  if (!session) return;
+  busyLabel = "Creating...";
+  githubStatusMessage = "";
+  render();
+  try {
+    const settings = await getSettings();
+    if (!settings.githubAccessToken) {
+      githubStatusMessage = "Connect GitHub in Settings first.";
+      return;
+    }
+    if (!settings.githubSelectedRepo) {
+      githubStatusMessage = "Select a GitHub repository in Settings first.";
+      return;
+    }
+    const issue = buildGitHubIssue({
+      session,
+      report,
+      labels: settings.githubDefaultLabels ?? ["bug"]
+    });
+    const created = await createGitHubIssue(
+      settings.githubAccessToken,
+      settings.githubSelectedRepo,
+      issue
+    );
+    githubStatusMessage = `Created issue #${created.number}: ${created.html_url}`;
+  } catch (error) {
+    githubStatusMessage = error instanceof Error ? error.message : String(error);
+  } finally {
+    busyLabel = "";
+    render();
+  }
+}
+
 function downloadDataUrl(filename: string, url: string, revoke = false): void {
   const link = document.createElement("a");
   link.href = url;
@@ -418,6 +462,10 @@ function statusCopy(current: CaptureSession): string {
   if (current.status === "capturing") return "Capturing context...";
   if (current.status === "failed") return "Capture failed";
   return "No evidence attached yet";
+}
+
+function renderGitHubHelp(): string {
+  return "Creates an issue in the repository selected in Settings. Screenshots and recordings stay in the local ZIP export.";
 }
 
 function formatDate(value: string): string {

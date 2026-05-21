@@ -376,13 +376,39 @@ async function captureVisibleTab(windowId) {
 }
 async function selectRegion(tabId) {
   if (typeof tabId !== "number") throw new Error("Cannot select a region without an active tab.");
-  const response = await chrome.tabs.sendMessage(tabId, {
-    type: "START_REGION_SELECTION"
-  });
+  const response = await requestRegionSelection(tabId);
   if (!isCaptureRegion(response)) {
     throw new Error(response?.error || "Region selection canceled.");
   }
   return response;
+}
+async function requestRegionSelection(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "START_REGION_SELECTION"
+    });
+  } catch (error) {
+    if (!isMissingReceiverError(error)) throw error;
+    await injectContentScript(tabId);
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "START_REGION_SELECTION"
+    });
+  }
+}
+async function injectContentScript(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not start region selection on this page. ${message}`);
+  }
+}
+function isMissingReceiverError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Receiving end does not exist") || message.includes("Could not establish connection");
 }
 function isCaptureRegion(value) {
   return !!value && typeof value.x === "number" && typeof value.y === "number" && typeof value.width === "number" && typeof value.height === "number";

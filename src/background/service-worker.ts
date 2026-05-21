@@ -345,13 +345,47 @@ async function captureVisibleTab(windowId?: number): Promise<string> {
 
 async function selectRegion(tabId?: number): Promise<CaptureRegion> {
   if (typeof tabId !== "number") throw new Error("Cannot select a region without an active tab.");
-  const response = (await chrome.tabs.sendMessage(tabId, {
-    type: "START_REGION_SELECTION"
-  } satisfies RuntimeMessage)) as CaptureRegion | { error?: string } | undefined;
+  const response = await requestRegionSelection(tabId);
   if (!isCaptureRegion(response)) {
     throw new Error(response?.error || "Region selection canceled.");
   }
   return response;
+}
+
+async function requestRegionSelection(
+  tabId: number
+): Promise<CaptureRegion | { error?: string } | undefined> {
+  try {
+    return (await chrome.tabs.sendMessage(tabId, {
+      type: "START_REGION_SELECTION"
+    } satisfies RuntimeMessage)) as CaptureRegion | { error?: string } | undefined;
+  } catch (error) {
+    if (!isMissingReceiverError(error)) throw error;
+    await injectContentScript(tabId);
+    return (await chrome.tabs.sendMessage(tabId, {
+      type: "START_REGION_SELECTION"
+    } satisfies RuntimeMessage)) as CaptureRegion | { error?: string } | undefined;
+  }
+}
+
+async function injectContentScript(tabId: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not start region selection on this page. ${message}`);
+  }
+}
+
+function isMissingReceiverError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("Receiving end does not exist") ||
+    message.includes("Could not establish connection")
+  );
 }
 
 function isCaptureRegion(value: CaptureRegion | { error?: string } | undefined): value is CaptureRegion {

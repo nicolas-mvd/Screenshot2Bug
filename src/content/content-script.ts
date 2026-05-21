@@ -1,35 +1,42 @@
 import type { RuntimeMessage } from "../shared/types";
 import type { CaptureRegion } from "../shared/types";
 
-window.addEventListener("message", (event) => {
-  if (event.source !== window || event.data?.source !== "screenshot2bug") return;
+const contentScriptKey = "__screenshot2bug_content_script__";
+const contentWindow = window as unknown as Window & Record<string, boolean | undefined>;
 
-  chrome.runtime
-    .sendMessage({
-      type: "LOG_CONSOLE_ENTRY",
-      entry: event.data.entry
-    } satisfies RuntimeMessage)
-    .catch(() => {
-      // The extension context can disappear during reloads; ignore transient logging failures.
-    });
-});
+if (!contentWindow[contentScriptKey]) {
+  contentWindow[contentScriptKey] = true;
 
-chrome.runtime.onMessage.addListener(
-  (
-    message: RuntimeMessage,
-    _sender,
-    sendResponse: (response: CaptureRegion | { error: string }) => void
-  ) => {
-    if (message.type !== "START_REGION_SELECTION") return false;
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "screenshot2bug") return;
 
-    void selectRegion()
-      .then((region) => sendResponse(region))
-      .catch((error: unknown) =>
-        sendResponse({ error: error instanceof Error ? error.message : String(error) })
-      );
-    return true;
-  }
-);
+    chrome.runtime
+      .sendMessage({
+        type: "LOG_CONSOLE_ENTRY",
+        entry: event.data.entry
+      } satisfies RuntimeMessage)
+      .catch(() => {
+        // The extension context can disappear during reloads; ignore transient logging failures.
+      });
+  });
+
+  chrome.runtime.onMessage.addListener(
+    (
+      message: RuntimeMessage,
+      _sender,
+      sendResponse: (response: CaptureRegion | { error: string }) => void
+    ) => {
+      if (message.type !== "START_REGION_SELECTION") return false;
+
+      void selectRegion()
+        .then((region) => sendResponse(region))
+        .catch((error: unknown) =>
+          sendResponse({ error: error instanceof Error ? error.message : String(error) })
+        );
+      return true;
+    }
+  );
+}
 
 function selectRegion(): Promise<CaptureRegion> {
   return new Promise((resolve, reject) => {

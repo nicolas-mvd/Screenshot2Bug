@@ -1,21 +1,26 @@
 // src/content/content-script.ts
-window.addEventListener("message", (event) => {
-  if (event.source !== window || event.data?.source !== "screenshot2bug") return;
-  chrome.runtime.sendMessage({
-    type: "LOG_CONSOLE_ENTRY",
-    entry: event.data.entry
-  }).catch(() => {
+var contentScriptKey = "__screenshot2bug_content_script__";
+var contentWindow = window;
+if (!contentWindow[contentScriptKey]) {
+  contentWindow[contentScriptKey] = true;
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "screenshot2bug") return;
+    chrome.runtime.sendMessage({
+      type: "LOG_CONSOLE_ENTRY",
+      entry: event.data.entry
+    }).catch(() => {
+    });
   });
-});
-chrome.runtime.onMessage.addListener(
-  (message, _sender, sendResponse) => {
-    if (message.type !== "START_REGION_SELECTION") return false;
-    void selectRegion().then((region) => sendResponse(region)).catch(
-      (error) => sendResponse({ error: error instanceof Error ? error.message : String(error) })
-    );
-    return true;
-  }
-);
+  chrome.runtime.onMessage.addListener(
+    (message, _sender, sendResponse) => {
+      if (message.type !== "START_REGION_SELECTION") return false;
+      void selectRegion().then((region) => sendResponse(region)).catch(
+        (error) => sendResponse({ error: error instanceof Error ? error.message : String(error) })
+      );
+      return true;
+    }
+  );
+}
 function selectRegion() {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector("[data-screenshot2bug-region-overlay]");

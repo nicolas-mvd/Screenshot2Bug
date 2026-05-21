@@ -3,6 +3,13 @@ import type { CaptureRegion } from "../shared/types";
 
 const contentScriptKey = "__screenshot2bug_content_script__";
 const contentWindow = window as unknown as Window & Record<string, boolean | undefined>;
+let activeRecordingControl:
+  | {
+      sessionId: string;
+      state: "recording" | "saving";
+    }
+  | undefined;
+let recordingControlsWatchHandle: number | undefined;
 
 if (!contentWindow[contentScriptKey]) {
   contentWindow[contentScriptKey] = true;
@@ -59,6 +66,12 @@ if (!contentWindow[contentScriptKey]) {
 }
 
 function showRecordingControls(sessionId: string, state: "recording" | "saving"): void {
+  activeRecordingControl = { sessionId, state };
+  renderRecordingControls(sessionId, state);
+  startRecordingControlsWatch();
+}
+
+function renderRecordingControls(sessionId: string, state: "recording" | "saving"): void {
   const existing = document.querySelector<HTMLElement>("[data-screenshot2bug-recording-controls]");
   if (existing?.dataset.sessionId === sessionId) {
     updateRecordingControls(existing, state);
@@ -119,6 +132,19 @@ function showRecordingControls(sessionId: string, state: "recording" | "saving")
   updateRecordingControls(controls, state);
 }
 
+function startRecordingControlsWatch(): void {
+  if (typeof recordingControlsWatchHandle === "number") return;
+  recordingControlsWatchHandle = window.setInterval(() => {
+    if (!activeRecordingControl) return;
+    const controls = document.querySelector<HTMLElement>("[data-screenshot2bug-recording-controls]");
+    if (controls?.dataset.sessionId === activeRecordingControl.sessionId) {
+      updateRecordingControls(controls, activeRecordingControl.state);
+      return;
+    }
+    renderRecordingControls(activeRecordingControl.sessionId, activeRecordingControl.state);
+  }, 1000);
+}
+
 function updateRecordingControls(container: HTMLElement, state: "recording" | "saving"): void {
   const label = container.querySelector<HTMLElement>("[data-role='label']");
   const button = container.querySelector<HTMLButtonElement>("[data-role='stop']");
@@ -132,6 +158,13 @@ function updateRecordingControls(container: HTMLElement, state: "recording" | "s
 }
 
 function hideRecordingControls(sessionId: string): void {
+  if (activeRecordingControl?.sessionId === sessionId) {
+    activeRecordingControl = undefined;
+  }
+  if (!activeRecordingControl && typeof recordingControlsWatchHandle === "number") {
+    window.clearInterval(recordingControlsWatchHandle);
+    recordingControlsWatchHandle = undefined;
+  }
   const controls = document.querySelector<HTMLElement>("[data-screenshot2bug-recording-controls]");
   if (controls?.dataset.sessionId === sessionId) controls.remove();
 }

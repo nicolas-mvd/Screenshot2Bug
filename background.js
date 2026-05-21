@@ -107,6 +107,7 @@ function normalizeSession(session) {
 }
 
 // src/background/service-worker.ts
+var recordingControlRestoreTimers = /* @__PURE__ */ new Map();
 chrome.commands.onCommand.addListener((command) => {
   if (command === "capture-screenshot-full") {
     void captureScreenshot(true, "full");
@@ -119,6 +120,11 @@ chrome.commands.onCommand.addListener((command) => {
   }
   if (command === "capture-video-region") {
     void captureVideo(true, "region");
+  }
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status || changeInfo.url) {
+    scheduleRecordingControlsRestore(tabId);
   }
 });
 chrome.runtime.onMessage.addListener(
@@ -436,12 +442,26 @@ async function restoreRecordingControlsForTab(tabId) {
   if (!recordingSession) return;
   await showRecordingControls(tabId, recordingSession.id, "recording");
 }
+function scheduleRecordingControlsRestore(tabId) {
+  const existing = recordingControlRestoreTimers.get(tabId);
+  if (typeof existing === "number") {
+    self.clearTimeout(existing);
+  }
+  const timeout = self.setTimeout(() => {
+    recordingControlRestoreTimers.delete(tabId);
+    void restoreRecordingControlsForTab(tabId);
+  }, 700);
+  recordingControlRestoreTimers.set(tabId, timeout);
+}
 async function showRecordingControls(tabId, sessionId, state) {
-  await sendContentMessage(tabId, {
-    type: "SHOW_RECORDING_CONTROLS",
-    sessionId,
-    state
-  });
+  try {
+    await sendContentMessageWithInjection(tabId, {
+      type: "SHOW_RECORDING_CONTROLS",
+      sessionId,
+      state
+    });
+  } catch {
+  }
 }
 async function hideRecordingControls(tabId, sessionId) {
   await sendContentMessage(tabId, {
@@ -453,6 +473,15 @@ async function sendContentMessage(tabId, message) {
   try {
     await chrome.tabs.sendMessage(tabId, message);
   } catch {
+  }
+}
+async function sendContentMessageWithInjection(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!isMissingReceiverError(error)) throw error;
+    await injectContentScript(tabId);
+    await chrome.tabs.sendMessage(tabId, message);
   }
 }
 async function requestRegionSelection(tabId) {

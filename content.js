@@ -1,6 +1,8 @@
 // src/content/content-script.ts
 var contentScriptKey = "__screenshot2bug_content_script__";
 var contentWindow = window;
+var activeRecordingControl;
+var recordingControlsWatchHandle;
 if (!contentWindow[contentScriptKey]) {
   contentWindow[contentScriptKey] = true;
   window.addEventListener("message", (event) => {
@@ -36,6 +38,11 @@ if (!contentWindow[contentScriptKey]) {
   });
 }
 function showRecordingControls(sessionId, state) {
+  activeRecordingControl = { sessionId, state };
+  renderRecordingControls(sessionId, state);
+  startRecordingControlsWatch();
+}
+function renderRecordingControls(sessionId, state) {
   const existing = document.querySelector("[data-screenshot2bug-recording-controls]");
   if (existing?.dataset.sessionId === sessionId) {
     updateRecordingControls(existing, state);
@@ -90,6 +97,18 @@ function showRecordingControls(sessionId, state) {
   document.documentElement.append(controls);
   updateRecordingControls(controls, state);
 }
+function startRecordingControlsWatch() {
+  if (typeof recordingControlsWatchHandle === "number") return;
+  recordingControlsWatchHandle = window.setInterval(() => {
+    if (!activeRecordingControl) return;
+    const controls = document.querySelector("[data-screenshot2bug-recording-controls]");
+    if (controls?.dataset.sessionId === activeRecordingControl.sessionId) {
+      updateRecordingControls(controls, activeRecordingControl.state);
+      return;
+    }
+    renderRecordingControls(activeRecordingControl.sessionId, activeRecordingControl.state);
+  }, 1e3);
+}
 function updateRecordingControls(container, state) {
   const label = container.querySelector("[data-role='label']");
   const button = container.querySelector("[data-role='stop']");
@@ -102,6 +121,13 @@ function updateRecordingControls(container, state) {
   }
 }
 function hideRecordingControls(sessionId) {
+  if (activeRecordingControl?.sessionId === sessionId) {
+    activeRecordingControl = void 0;
+  }
+  if (!activeRecordingControl && typeof recordingControlsWatchHandle === "number") {
+    window.clearInterval(recordingControlsWatchHandle);
+    recordingControlsWatchHandle = void 0;
+  }
   const controls = document.querySelector("[data-screenshot2bug-recording-controls]");
   if (controls?.dataset.sessionId === sessionId) controls.remove();
 }

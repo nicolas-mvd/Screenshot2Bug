@@ -19,6 +19,8 @@ import type {
   RuntimeMessage
 } from "../shared/types";
 
+const recordingControlRestoreTimers = new Map<number, number>();
+
 chrome.commands.onCommand.addListener((command) => {
   if (command === "capture-screenshot-full") {
     void captureScreenshot(true, "full");
@@ -31,6 +33,12 @@ chrome.commands.onCommand.addListener((command) => {
   }
   if (command === "capture-video-region") {
     void captureVideo(true, "region");
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status || changeInfo.url) {
+    scheduleRecordingControlsRestore(tabId);
   }
 });
 
@@ -420,16 +428,32 @@ async function restoreRecordingControlsForTab(tabId: number): Promise<void> {
   await showRecordingControls(tabId, recordingSession.id, "recording");
 }
 
+function scheduleRecordingControlsRestore(tabId: number): void {
+  const existing = recordingControlRestoreTimers.get(tabId);
+  if (typeof existing === "number") {
+    self.clearTimeout(existing);
+  }
+  const timeout = self.setTimeout(() => {
+    recordingControlRestoreTimers.delete(tabId);
+    void restoreRecordingControlsForTab(tabId);
+  }, 700);
+  recordingControlRestoreTimers.set(tabId, timeout);
+}
+
 async function showRecordingControls(
   tabId: number,
   sessionId: string,
   state: "recording" | "saving"
 ): Promise<void> {
-  await sendContentMessage(tabId, {
-    type: "SHOW_RECORDING_CONTROLS",
-    sessionId,
-    state
-  });
+  try {
+    await sendContentMessageWithInjection(tabId, {
+      type: "SHOW_RECORDING_CONTROLS",
+      sessionId,
+      state
+    });
+  } catch {
+    // Some pages cannot receive injected extension UI; keep the popup stop control as fallback.
+  }
 }
 
 async function hideRecordingControls(tabId: number, sessionId: string): Promise<void> {
@@ -444,6 +468,19 @@ async function sendContentMessage(tabId: number, message: RuntimeMessage): Promi
     await chrome.tabs.sendMessage(tabId, message);
   } catch {
     // The tab may have navigated or closed while the recording was running.
+  }
+}
+
+async function sendContentMessageWithInjection(
+  tabId: number,
+  message: RuntimeMessage
+): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!isMissingReceiverError(error)) throw error;
+    await injectContentScript(tabId);
+    await chrome.tabs.sendMessage(tabId, message);
   }
 }
 

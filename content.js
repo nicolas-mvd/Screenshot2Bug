@@ -30,6 +30,10 @@ if (!contentWindow[contentScriptKey]) {
       return true;
     }
   );
+  chrome.runtime.sendMessage({
+    type: "CONTENT_SCRIPT_READY"
+  }).catch(() => {
+  });
 }
 function showRecordingControls(sessionId, state) {
   const existing = document.querySelector("[data-screenshot2bug-recording-controls]");
@@ -89,7 +93,7 @@ function showRecordingControls(sessionId, state) {
 function updateRecordingControls(container, state) {
   const label = container.querySelector("[data-role='label']");
   const button = container.querySelector("[data-role='stop']");
-  if (label) label.textContent = state === "saving" ? "Saving recording..." : "Recording selected area";
+  if (label) label.textContent = state === "saving" ? "Saving recording..." : "Recording tab";
   if (button) {
     button.textContent = state === "saving" ? "Saving..." : "Stop";
     button.disabled = state === "saving";

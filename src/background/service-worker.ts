@@ -80,6 +80,11 @@ async function handleMessage(message: RuntimeMessage, sender: chrome.runtime.Mes
       return getSession(message.sessionId);
     case "UPDATE_SESSION":
       return patchSession(message.sessionId, message.patch);
+    case "CONTENT_SCRIPT_READY":
+      if (typeof sender.tab?.id === "number") {
+        await restoreRecordingControlsForTab(sender.tab.id);
+      }
+      return undefined;
     case "LOG_CONSOLE_ENTRY":
       if (typeof sender.tab?.id === "number") {
         await appendConsoleEntry(sender.tab.id, message.entry);
@@ -405,6 +410,14 @@ async function hideRecordingControlsForSession(sessionId: string): Promise<void>
   const session = await getSession(sessionId);
   if (typeof session?.tabId !== "number") return;
   await hideRecordingControls(session.tabId, sessionId);
+}
+
+async function restoreRecordingControlsForTab(tabId: number): Promise<void> {
+  const recordingSession = (await getSortedSessions()).find(
+    (item) => item.status === "recording" && item.tabId === tabId
+  );
+  if (!recordingSession) return;
+  await showRecordingControls(tabId, recordingSession.id, "recording");
 }
 
 async function showRecordingControls(

@@ -160,6 +160,11 @@ async function handleMessage(message, sender) {
       return getSession(message.sessionId);
     case "UPDATE_SESSION":
       return patchSession(message.sessionId, message.patch);
+    case "CONTENT_SCRIPT_READY":
+      if (typeof sender.tab?.id === "number") {
+        await restoreRecordingControlsForTab(sender.tab.id);
+      }
+      return void 0;
     case "LOG_CONSOLE_ENTRY":
       if (typeof sender.tab?.id === "number") {
         await appendConsoleEntry(sender.tab.id, message.entry);
@@ -423,6 +428,13 @@ async function hideRecordingControlsForSession(sessionId) {
   const session = await getSession(sessionId);
   if (typeof session?.tabId !== "number") return;
   await hideRecordingControls(session.tabId, sessionId);
+}
+async function restoreRecordingControlsForTab(tabId) {
+  const recordingSession = (await getSortedSessions()).find(
+    (item) => item.status === "recording" && item.tabId === tabId
+  );
+  if (!recordingSession) return;
+  await showRecordingControls(tabId, recordingSession.id, "recording");
 }
 async function showRecordingControls(tabId, sessionId, state) {
   await sendContentMessage(tabId, {

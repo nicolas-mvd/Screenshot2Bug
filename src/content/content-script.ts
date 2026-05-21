@@ -48,6 +48,14 @@ if (!contentWindow[contentScriptKey]) {
       return true;
     }
   );
+
+  chrome.runtime
+    .sendMessage({
+      type: "CONTENT_SCRIPT_READY"
+    } satisfies RuntimeMessage)
+    .catch(() => {
+      // The extension context can disappear during reloads; ignore transient readiness pings.
+    });
 }
 
 function showRecordingControls(sessionId: string, state: "recording" | "saving"): void {
@@ -114,7 +122,7 @@ function showRecordingControls(sessionId: string, state: "recording" | "saving")
 function updateRecordingControls(container: HTMLElement, state: "recording" | "saving"): void {
   const label = container.querySelector<HTMLElement>("[data-role='label']");
   const button = container.querySelector<HTMLButtonElement>("[data-role='stop']");
-  if (label) label.textContent = state === "saving" ? "Saving recording..." : "Recording selected area";
+  if (label) label.textContent = state === "saving" ? "Saving recording..." : "Recording tab";
   if (button) {
     button.textContent = state === "saving" ? "Saving..." : "Stop";
     button.disabled = state === "saving";

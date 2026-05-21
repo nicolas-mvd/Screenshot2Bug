@@ -572,7 +572,10 @@ async function saveEdit(): Promise<void> {
     }
   });
   report = buildTemplateReport({ session, steps, notes });
-  await closeReportFocus("Screenshot edits saved. Report closed.");
+  editState = undefined;
+  statusMessage = "Screenshot edits saved.";
+  await refreshSessions();
+  render();
 }
 
 async function closeReportFocus(message = ""): Promise<void> {

@@ -53,6 +53,18 @@ Reports stay in local extension storage until removed by a future cleanup featur
 
 Open the extension settings page and save an OpenAI API key. If no key is saved, Screenshot2Bug still creates a structured Markdown template report from the captured context.
 
+## GitHub Issues
+
+Screenshot2Bug can create a GitHub issue from the current bug report.
+
+1. Create a GitHub OAuth App and enable Device Flow.
+2. Copy the OAuth App's public Client ID.
+3. Open Screenshot2Bug settings and paste the Client ID.
+4. Click **Connect GitHub**, authorize the device code, and select a repository.
+5. Capture or open a report, then click **Create GitHub issue**.
+
+The GitHub token is stored locally in Chrome extension storage. Screenshots and recordings are not uploaded to GitHub in this version; they remain available through the local ZIP export.
+
 ## Test Page
 
 The repository includes `test-error-page.html`, a local fixture that intentionally creates console errors so extension capture can be tested.

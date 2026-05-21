@@ -282,7 +282,8 @@ h2 {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid #cad0d8;
   border-radius: 8px;
@@ -297,6 +298,7 @@ textarea {
 
 input:focus,
 textarea:focus,
+select:focus,
 button:focus-visible {
   outline: 3px solid rgba(22, 106, 106, 0.22);
   border-color: #166a6a;

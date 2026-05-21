@@ -3,6 +3,7 @@ import { buildTemplateReport, generateAiReport } from "../shared/report";
 import { getSettings, getSortedSessions } from "../shared/storage";
 import { DEFAULT_MODEL } from "../shared/types";
 import { buildReportZip } from "../shared/zip";
+import { buildGitHubIssue, createGitHubIssue } from "../shared/github";
 import type {
   BackgroundResponse,
   CaptureArea,
@@ -22,6 +23,7 @@ let notes = "";
 let report = "";
 let busyLabel = "";
 let statusMessage = "";
+let githubStatusMessage = "";
 let pollHandle: number | undefined;
 let editState: ScreenshotEditState | undefined;
 
@@ -185,6 +187,13 @@ function renderSession(current: CaptureSession): string {
       <button id="copyButton" ${!report ? "disabled" : ""}>Copy Markdown</button>
       <button id="downloadButton" ${!report ? "disabled" : ""}>Download ZIP</button>
     </div>
+
+    <section class="panel">
+      <h2>GitHub issue</h2>
+      ${githubStatusMessage ? `<p class="notice">${escapeHtml(githubStatusMessage)}</p>` : ""}
+      <p class="muted">${renderGitHubHelp()}</p>
+      <button class="primary" id="createGitHubIssueButton" ${!report || busyLabel ? "disabled" : ""}>Create GitHub issue</button>
+    </section>
   `;
 }
 
@@ -339,6 +348,7 @@ function bindEvents(): void {
   document.querySelector("#aiButton")?.addEventListener("click", () => void generateReport());
   document.querySelector("#copyButton")?.addEventListener("click", () => void copyReport());
   document.querySelector("#downloadButton")?.addEventListener("click", () => void downloadBundle());
+  document.querySelector("#createGitHubIssueButton")?.addEventListener("click", () => void createIssue());
   document.querySelector("#doneButton")?.addEventListener("click", () => {
     void closeReportFocus("Report closed. New captures will start a fresh report.");
   });
@@ -439,6 +449,7 @@ async function runCapture(message: RuntimeMessage): Promise<void> {
   try {
     session = await request<CaptureSession>(message);
     editState = undefined;
+    githubStatusMessage = "";
     report = session ? buildTemplateReport({ session, steps, notes }) : "";
     await refreshSessions();
     startPolling();
@@ -453,6 +464,7 @@ async function runCapture(message: RuntimeMessage): Promise<void> {
 async function openSession(sessionId: string): Promise<void> {
   session = await request<CaptureSession>({ type: "SET_ACTIVE_SESSION", sessionId });
   editState = undefined;
+  githubStatusMessage = "";
   report = session ? buildTemplateReport({ session, steps, notes }) : "";
   statusMessage = "Report reopened. New attachments will be added here.";
   await refreshSessions();
@@ -581,6 +593,7 @@ async function closeReportFocus(message = ""): Promise<void> {
   report = "";
   busyLabel = "";
   statusMessage = message;
+  githubStatusMessage = "";
   await refreshSessions();
   render();
 }
@@ -756,6 +769,43 @@ function normalizeRect(
   };
 }
 
+async function createIssue(): Promise<void> {
+  if (!session) return;
+  busyLabel = "Creating...";
+  githubStatusMessage = "";
+  render();
+  try {
+    const settings = await getSettings();
+    if (!settings.githubAccessToken) {
+      githubStatusMessage = "Connect GitHub in Settings first.";
+      return;
+    }
+    if (!settings.githubSelectedRepo) {
+      githubStatusMessage = "Select a GitHub repository in Settings first.";
+      return;
+    }
+    const issue = buildGitHubIssue({
+      session,
+      report,
+      labels: settings.githubDefaultLabels ?? ["bug"]
+    });
+    const created = await createGitHubIssue(
+      settings.githubAccessToken,
+      settings.githubSelectedRepo,
+      issue
+    );
+    await closeReportFocus(`Created GitHub issue #${created.number}: ${created.html_url}. Report closed.`);
+    return;
+  } catch (error) {
+    githubStatusMessage = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (session) {
+      busyLabel = "";
+      render();
+    }
+  }
+}
+
 function downloadDataUrl(filename: string, url: string, revoke = false): void {
   const link = document.createElement("a");
   link.href = url;
@@ -809,6 +859,10 @@ function statusCopy(current: CaptureSession): string {
   if (current.status === "capturing") return "Capturing context...";
   if (current.status === "failed") return "Capture failed";
   return "No evidence attached yet";
+}
+
+function renderGitHubHelp(): string {
+  return "Creates an issue in the repository selected in Settings. Screenshots and recordings stay in the local ZIP export.";
 }
 
 function formatDate(value: string): string {

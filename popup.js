@@ -262,6 +262,63 @@ var CRC_TABLE = (() => {
   return table;
 })();
 
+// src/shared/github.ts
+var GITHUB_API_URL = "https://api.github.com";
+async function createGitHubIssue(token, repo, issue) {
+  return githubFetch(token, `/repos/${repo.owner}/${repo.name}/issues`, {
+    method: "POST",
+    body: JSON.stringify(issue)
+  });
+}
+function buildGitHubIssue({
+  session: session2,
+  report: report2,
+  labels = ["bug"]
+}) {
+  const title = buildIssueTitle(session2);
+  const body = `${report2.trim()}
+
+---
+
+Created with Screenshot2Bug.
+
+Note: screenshots and recordings are kept in the local ZIP export for this report and are not uploaded to GitHub in this version.`;
+  return {
+    title,
+    body,
+    labels: labels.filter(Boolean)
+  };
+}
+function buildIssueTitle(session2) {
+  const pageTitle = session2.metadata?.title?.trim();
+  const url = session2.metadata?.url?.trim();
+  if (pageTitle) return `Bug: ${pageTitle}`.slice(0, 256);
+  if (url) return `Bug: ${url}`.slice(0, 256);
+  return `Bug report ${session2.id.slice(0, 8)}`;
+}
+async function githubFetch(token, path, init2 = {}) {
+  const response = await fetch(`${GITHUB_API_URL}${path}`, {
+    ...init2,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...init2.headers || {}
+    }
+  });
+  return parseGitHubResponse(response);
+}
+async function parseGitHubResponse(response) {
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    const message = data.message || `GitHub request failed with ${response.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
 // src/popup/main.ts
 var app = document.querySelector("#app");
 if (!app) throw new Error("Missing app root.");
@@ -273,6 +330,7 @@ var notes = "";
 var report = "";
 var busyLabel = "";
 var statusMessage = "";
+var githubStatusMessage = "";
 var pollHandle;
 var editState;
 void init();
@@ -421,6 +479,13 @@ function renderSession(current) {
       <button id="copyButton" ${!report ? "disabled" : ""}>Copy Markdown</button>
       <button id="downloadButton" ${!report ? "disabled" : ""}>Download ZIP</button>
     </div>
+
+    <section class="panel">
+      <h2>GitHub issue</h2>
+      ${githubStatusMessage ? `<p class="notice">${escapeHtml(githubStatusMessage)}</p>` : ""}
+      <p class="muted">${renderGitHubHelp()}</p>
+      <button class="primary" id="createGitHubIssueButton" ${!report || busyLabel ? "disabled" : ""}>Create GitHub issue</button>
+    </section>
   `;
 }
 function renderEvidence(current) {
@@ -552,6 +617,7 @@ function bindEvents() {
   document.querySelector("#aiButton")?.addEventListener("click", () => void generateReport());
   document.querySelector("#copyButton")?.addEventListener("click", () => void copyReport());
   document.querySelector("#downloadButton")?.addEventListener("click", () => void downloadBundle());
+  document.querySelector("#createGitHubIssueButton")?.addEventListener("click", () => void createIssue());
   document.querySelector("#doneButton")?.addEventListener("click", () => {
     void closeReportFocus("Report closed. New captures will start a fresh report.");
   });
@@ -643,6 +709,7 @@ async function runCapture(message) {
   try {
     session = await request(message);
     editState = void 0;
+    githubStatusMessage = "";
     report = session ? buildTemplateReport({ session, steps, notes }) : "";
     await refreshSessions();
     startPolling();
@@ -656,6 +723,7 @@ async function runCapture(message) {
 async function openSession(sessionId) {
   session = await request({ type: "SET_ACTIVE_SESSION", sessionId });
   editState = void 0;
+  githubStatusMessage = "";
   report = session ? buildTemplateReport({ session, steps, notes }) : "";
   statusMessage = "Report reopened. New attachments will be added here.";
   await refreshSessions();
@@ -771,6 +839,7 @@ async function closeReportFocus(message = "") {
   report = "";
   busyLabel = "";
   statusMessage = message;
+  githubStatusMessage = "";
   await refreshSessions();
   render();
 }
@@ -908,6 +977,42 @@ function normalizeRect(start, end) {
     height: Math.abs(end.y - start.y)
   };
 }
+async function createIssue() {
+  if (!session) return;
+  busyLabel = "Creating...";
+  githubStatusMessage = "";
+  render();
+  try {
+    const settings = await getSettings();
+    if (!settings.githubAccessToken) {
+      githubStatusMessage = "Connect GitHub in Settings first.";
+      return;
+    }
+    if (!settings.githubSelectedRepo) {
+      githubStatusMessage = "Select a GitHub repository in Settings first.";
+      return;
+    }
+    const issue = buildGitHubIssue({
+      session,
+      report,
+      labels: settings.githubDefaultLabels ?? ["bug"]
+    });
+    const created = await createGitHubIssue(
+      settings.githubAccessToken,
+      settings.githubSelectedRepo,
+      issue
+    );
+    await closeReportFocus(`Created GitHub issue #${created.number}: ${created.html_url}. Report closed.`);
+    return;
+  } catch (error) {
+    githubStatusMessage = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (session) {
+      busyLabel = "";
+      render();
+    }
+  }
+}
 function downloadDataUrl(filename, url, revoke = false) {
   const link = document.createElement("a");
   link.href = url;
@@ -952,6 +1057,9 @@ function statusCopy(current) {
   if (current.status === "capturing") return "Capturing context...";
   if (current.status === "failed") return "Capture failed";
   return "No evidence attached yet";
+}
+function renderGitHubHelp() {
+  return "Creates an issue in the repository selected in Settings. Screenshots and recordings stay in the local ZIP export.";
 }
 function formatDate(value) {
   return new Intl.DateTimeFormat(void 0, {

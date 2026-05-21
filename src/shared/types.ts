@@ -1,4 +1,5 @@
 export type CaptureMode = "screenshot" | "video";
+export type CaptureArea = "full" | "region";
 
 export type CaptureStatus =
   | "draft"
@@ -29,6 +30,10 @@ export interface EvidenceAttachment {
   createdAt: string;
   url?: string;
   title?: string;
+  captureArea?: CaptureArea;
+  region?: CaptureRegion;
+  originalDataUrl?: string;
+  editedAt?: string;
 }
 
 export interface RecordingAttachment extends EvidenceAttachment {
@@ -52,6 +57,16 @@ export interface PageMetadata {
     availHeight: number;
     colorDepth: number;
   };
+}
+
+export interface CaptureRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  devicePixelRatio: number;
 }
 
 export interface CaptureSession {
@@ -95,23 +110,31 @@ export interface BackgroundResponse<T = unknown> {
 }
 
 export type RuntimeMessage =
-  | { type: "CAPTURE_SCREENSHOT" }
-  | { type: "START_VIDEO_CAPTURE" }
-  | { type: "ADD_SCREENSHOT_TO_SESSION"; sessionId: string }
-  | { type: "ADD_VIDEO_TO_SESSION"; sessionId: string }
+  | { type: "CAPTURE_SCREENSHOT"; area?: CaptureArea }
+  | { type: "START_VIDEO_CAPTURE"; area?: CaptureArea }
+  | { type: "ADD_SCREENSHOT_TO_SESSION"; sessionId: string; area?: CaptureArea }
+  | { type: "ADD_VIDEO_TO_SESSION"; sessionId: string; area?: CaptureArea }
   | { type: "STOP_VIDEO_CAPTURE"; sessionId: string }
   | { type: "GET_SESSION"; sessionId?: string }
   | { type: "GET_SESSIONS" }
   | { type: "SET_ACTIVE_SESSION"; sessionId: string }
+  | { type: "CLEAR_ACTIVE_SESSION"; sessionId?: string }
   | { type: "UPDATE_SESSION"; sessionId: string; patch: Partial<CaptureSession> }
   | { type: "LOG_CONSOLE_ENTRY"; entry: ConsoleEntry }
-  | { type: "OFFSCREEN_START_RECORDING"; streamId: string; sessionId: string }
+  | { type: "START_REGION_SELECTION" }
+  | {
+      type: "OFFSCREEN_START_RECORDING";
+      streamId: string;
+      sessionId: string;
+      region?: CaptureRegion;
+    }
   | { type: "OFFSCREEN_STOP_RECORDING"; sessionId: string }
   | {
       type: "OFFSCREEN_RECORDING_COMPLETE";
       sessionId: string;
       dataUrl: string;
       mimeType: string;
+      region?: CaptureRegion;
     }
   | { type: "OFFSCREEN_RECORDING_ERROR"; sessionId: string; error: string };
 

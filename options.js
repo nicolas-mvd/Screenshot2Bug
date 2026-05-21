@@ -1,19 +1,34 @@
-import { DEFAULT_MODEL, escapeHtml, getSettings, saveSettings } from "./shared.js";
+// src/shared/types.ts
+var STORAGE_KEYS = {
+  latestSessionId: "latestSessionId",
+  settings: "settings",
+  sessions: "sessions",
+  consolePrefix: "console:"
+};
+var DEFAULT_MODEL = "gpt-5";
 
-const app = document.querySelector("#app");
+// src/shared/storage.ts
+async function getSettings() {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.settings);
+  return result[STORAGE_KEYS.settings] ?? {};
+}
+async function saveSettings(settings2) {
+  await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings2 });
+}
 
-let settings = {};
-let message = "";
-
+// src/options/main.ts
+var app = document.querySelector("#app");
+if (!app) throw new Error("Missing app root.");
+var root = app;
+var settings = {};
+var message = "";
 void init();
-
 async function init() {
   settings = await getSettings();
   render();
 }
-
 function render() {
-  app.innerHTML = `
+  root.innerHTML = `
     <section class="shell options-shell">
       <header class="topbar">
         <div>
@@ -22,7 +37,7 @@ function render() {
         </div>
       </header>
 
-      ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
+      ${message ? `<p class="notice">${message}</p>` : ""}
 
       <section class="panel">
         <label class="field">
@@ -40,18 +55,16 @@ function render() {
 
       <section class="panel">
         <h2>Shortcuts</h2>
-        <p class="muted">Defaults are Option+Shift+S/V for new reports and Control+Shift+S/V for attaching evidence. Chrome lets you remap them from the extensions shortcuts page.</p>
+        <p class="muted">Defaults are Option+Shift+S for full-tab screenshots, Option+Shift+A for selected-area screenshots, Option+Shift+V for full-tab videos, and Option+Shift+R for selected-area videos. Chrome lets you remap them from the extensions shortcuts page.</p>
         <button id="shortcutsButton">Open Chrome shortcuts</button>
       </section>
     </section>
   `;
-
   document.querySelector("#saveButton")?.addEventListener("click", () => void save());
   document.querySelector("#shortcutsButton")?.addEventListener("click", () => {
     void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
   });
 }
-
 async function save() {
   const openaiApiKey = document.querySelector("#apiKeyInput")?.value.trim();
   const openaiModel = document.querySelector("#modelInput")?.value.trim() || DEFAULT_MODEL;
@@ -59,4 +72,7 @@ async function save() {
   await saveSettings(settings);
   message = "Settings saved.";
   render();
+}
+function escapeHtml(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }

@@ -1,7 +1,8 @@
+// src/content/content-main.ts
 (() => {
-  if (window.__screenshot2bug_console_bridge__) return;
-  window.__screenshot2bug_console_bridge__ = true;
-
+  const bridgeKey = "__screenshot2bug_console_bridge__";
+  if (Reflect.get(window, bridgeKey)) return;
+  Reflect.set(window, bridgeKey, true);
   const serialize = (value) => {
     try {
       if (value instanceof Error) return value.stack || value.message;
@@ -11,7 +12,6 @@
       return String(value);
     }
   };
-
   const publish = (source, message, extras = {}) => {
     window.postMessage(
       {
@@ -20,7 +20,7 @@
           level: "error",
           source,
           message,
-          timestamp: new Date().toISOString(),
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           url: window.location.href,
           ...extras
         }
@@ -28,13 +28,11 @@
       "*"
     );
   };
-
   const originalError = console.error;
   console.error = (...args) => {
     publish("console", args.map(serialize).join(" "));
     originalError.apply(console, args);
   };
-
   window.addEventListener(
     "error",
     (event) => {
@@ -45,7 +43,6 @@
         publish("resource", `Failed to load ${tag}${url ? `: ${url}` : ""}`);
         return;
       }
-
       publish("error", event.message || "Window error", {
         line: event.lineno,
         column: event.colno,
@@ -54,11 +51,9 @@
     },
     true
   );
-
   window.addEventListener("unhandledrejection", (event) => {
     publish("unhandledrejection", serialize(event.reason));
   });
-
   window.addEventListener("securitypolicyviolation", (event) => {
     publish(
       "securitypolicyviolation",

@@ -22,10 +22,10 @@ export function buildTemplateReport({ session, steps, notes }: ReportInput): str
   const recordings = normalized.recordings ?? [];
   const attachments = [
     screenshots.length
-      ? `- Screenshots: ${screenshots.length} PNG file${screenshots.length === 1 ? "" : "s"}`
+      ? `- Screenshots: ${screenshots.length} PNG file${screenshots.length === 1 ? "" : "s"}${formatEvidenceDetails(screenshots)}`
       : "",
     recordings.length
-      ? `- Recordings: ${recordings.length} WebM file${recordings.length === 1 ? "" : "s"}`
+      ? `- Recordings: ${recordings.length} WebM file${recordings.length === 1 ? "" : "s"}${formatEvidenceDetails(recordings)}`
       : ""
   ]
     .filter(Boolean)
@@ -56,6 +56,18 @@ ${errorLines}
 ## Attachments
 ${attachments || "- No binary attachments."}
 `;
+}
+
+function formatEvidenceDetails(
+  items: Array<{ captureArea?: string; editedAt?: string }>
+): string {
+  const selected = items.filter((item) => item.captureArea === "region").length;
+  const edited = items.filter((item) => item.editedAt).length;
+  const details = [
+    selected ? `${selected} selected area` : "",
+    edited ? `${edited} edited` : ""
+  ].filter(Boolean);
+  return details.length ? ` (${details.join(", ")})` : "";
 }
 
 export async function generateAiReport(

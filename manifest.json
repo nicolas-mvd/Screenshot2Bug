@@ -24,33 +24,33 @@
   ],
   "host_permissions": ["<all_urls>", "https://api.openai.com/*"],
   "commands": {
-    "capture-screenshot": {
+    "capture-screenshot-full": {
       "suggested_key": {
         "default": "Alt+Shift+S",
         "mac": "Alt+Shift+S"
       },
-      "description": "Start a new screenshot bug report"
+      "description": "Capture a full-tab screenshot"
     },
-    "attach-screenshot": {
+    "capture-screenshot-region": {
       "suggested_key": {
-        "default": "Ctrl+Shift+S",
-        "mac": "MacCtrl+Shift+S"
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
       },
-      "description": "Attach a screenshot to the active bug report"
+      "description": "Capture a selected-area screenshot"
     },
-    "capture-video": {
+    "capture-video-full": {
       "suggested_key": {
         "default": "Alt+Shift+V",
         "mac": "Alt+Shift+V"
       },
-      "description": "Start a new video bug report"
+      "description": "Record a full-tab video"
     },
-    "attach-video": {
+    "capture-video-region": {
       "suggested_key": {
-        "default": "Ctrl+Shift+V",
-        "mac": "MacCtrl+Shift+V"
+        "default": "Alt+Shift+R",
+        "mac": "Alt+Shift+R"
       },
-      "description": "Attach a video to the active bug report"
+      "description": "Record a selected-area video"
     }
   },
   "content_scripts": [
@@ -66,6 +66,12 @@
       "run_at": "document_start",
       "all_frames": false,
       "world": "MAIN"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["offscreen.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

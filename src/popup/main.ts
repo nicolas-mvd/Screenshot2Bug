@@ -5,12 +5,15 @@ import { DEFAULT_MODEL } from "../shared/types";
 import { buildReportZip } from "../shared/zip";
 import type {
   BackgroundResponse,
+  CaptureArea,
   CaptureSession,
+  EvidenceAttachment,
   RuntimeMessage
 } from "../shared/types";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root.");
+const root = app;
 
 let session: CaptureSession | undefined;
 let sessions: CaptureSession[] = [];
@@ -20,6 +23,15 @@ let report = "";
 let busyLabel = "";
 let statusMessage = "";
 let pollHandle: number | undefined;
+let editState: ScreenshotEditState | undefined;
+
+type EditTool = "crop" | "rect" | "arrow" | "blur" | "text";
+
+interface ScreenshotEditState {
+  screenshotId: string;
+  history: string[];
+  tool: EditTool;
+}
 
 void init();
 
@@ -40,7 +52,7 @@ async function init(): Promise<void> {
 }
 
 function render(): void {
-  app.innerHTML = `
+  root.innerHTML = `
     <section class="shell">
       <header class="topbar">
         <div>
@@ -55,20 +67,34 @@ function render(): void {
       ${session?.error ? `<p class="error">${escapeHtml(session.error)}</p>` : ""}
 
       <section class="panel">
-        <h2>Start new report</h2>
-        <div class="mode-grid">
-          <button class="mode-card" id="screenshotButton">
+        <h2>New capture</h2>
+        <div class="capture-grid">
+          <button class="mode-card" id="screenshotFullButton">
             <span class="mode-icon">▣</span>
             <span>
-              <strong>New screenshot report</strong>
-              <small>Option+Shift+S</small>
+              <strong>Screenshot</strong>
+              <small>Full tab</small>
             </span>
           </button>
-          <button class="mode-card" id="videoButton">
+          <button class="mode-card" id="screenshotRegionButton">
+            <span class="mode-icon">⌖</span>
+            <span>
+              <strong>Screenshot</strong>
+              <small>Select area</small>
+            </span>
+          </button>
+          <button class="mode-card" id="videoFullButton">
             <span class="mode-icon">●</span>
             <span>
-              <strong>New video report</strong>
-              <small>Option+Shift+V</small>
+              <strong>Video</strong>
+              <small>Full tab</small>
+            </span>
+          </button>
+          <button class="mode-card" id="videoRegionButton">
+            <span class="mode-icon">◉</span>
+            <span>
+              <strong>Video</strong>
+              <small>Select area</small>
             </span>
           </button>
         </div>
@@ -80,6 +106,7 @@ function render(): void {
   `;
 
   bindEvents();
+  mountEditor();
 }
 
 function renderEmpty(): string {
@@ -109,23 +136,30 @@ function renderSession(current: CaptureSession): string {
         <div><strong>${current.consoleErrors.length}</strong><span>console errors</span></div>
         <div><strong>${metadata ? `${metadata.viewport.width}x${metadata.viewport.height}` : "--"}</strong><span>viewport</span></div>
       </section>
+      <div class="actions">
+        <button id="doneButton" ${current.status === "recording" ? "disabled" : ""}>Done</button>
+      </div>
     </section>
 
     ${canStop ? `<button class="primary danger" id="stopRecordingButton">Stop recording</button>` : ""}
 
     <section class="panel">
-      <h2>Add to current report</h2>
-      <div class="actions">
-        <button id="addScreenshotButton" ${busyLabel ? "disabled" : ""}>Attach screenshot</button>
-        <button id="addVideoButton" ${busyLabel || current.status === "recording" ? "disabled" : ""}>Attach video</button>
+      <h2>Add evidence</h2>
+      <div class="capture-grid compact">
+        <button id="addScreenshotFullButton" ${busyLabel ? "disabled" : ""}>Screenshot: full tab</button>
+        <button id="addScreenshotRegionButton" ${busyLabel ? "disabled" : ""}>Screenshot: select area</button>
+        <button id="addVideoFullButton" ${busyLabel || current.status === "recording" ? "disabled" : ""}>Video: full tab</button>
+        <button id="addVideoRegionButton" ${busyLabel || current.status === "recording" ? "disabled" : ""}>Video: select area</button>
       </div>
-      <p class="muted">Control+Shift+S attaches a screenshot. Control+Shift+V attaches a video.</p>
+      <p class="muted">Keyboard shortcuts start new captures. Existing reports use these evidence buttons.</p>
     </section>
 
     <section class="panel">
       <h2>Attached evidence</h2>
       ${renderEvidence(current)}
     </section>
+
+    ${renderEditPanel(current)}
 
     <label class="field">
       <span>Reproduction steps</span>
@@ -157,17 +191,30 @@ function renderSession(current: CaptureSession): string {
 function renderEvidence(current: CaptureSession): string {
   const items: string[] = [];
   for (const [index, screenshot] of (current.screenshots ?? []).entries()) {
+    const area = screenshot.captureArea === "region" ? "Selected area" : "Full tab";
     items.push(`
       <article class="evidence-item">
-        <div><strong>Attached screenshot ${index + 1}</strong><span>PNG included in ZIP</span></div>
+        <div class="evidence-heading">
+          <div><strong>Screenshot ${index + 1}</strong><span>${area} PNG included in ZIP</span></div>
+          <div class="evidence-actions">
+            <button data-edit-screenshot="${screenshot.id}">Edit</button>
+            <button data-download-screenshot="${screenshot.id}">Download</button>
+          </div>
+        </div>
         <img class="preview" src="${screenshot.dataUrl}" alt="Attached screenshot ${index + 1}" />
       </article>
     `);
   }
   for (const [index, recording] of (current.recordings ?? []).entries()) {
+    const area = recording.captureArea === "region" ? "Selected area" : "Full tab";
     items.push(`
       <article class="evidence-item">
-        <div><strong>Attached video ${index + 1}</strong><span>WebM included in ZIP</span></div>
+        <div class="evidence-heading">
+          <div><strong>Video ${index + 1}</strong><span>${area} WebM included in ZIP</span></div>
+          <div class="evidence-actions">
+            <button data-download-recording="${recording.id}">Download</button>
+          </div>
+        </div>
         <video class="preview" src="${recording.dataUrl}" controls></video>
       </article>
     `);
@@ -175,6 +222,38 @@ function renderEvidence(current: CaptureSession): string {
   return items.length
     ? items.join("")
     : `<div class="preview placeholder">${statusCopy(current)}</div>`;
+}
+
+function renderEditPanel(current: CaptureSession): string {
+  if (!editState) return "";
+  const screenshot = (current.screenshots ?? []).find((item) => item.id === editState?.screenshotId);
+  if (!screenshot) return "";
+  const toolButton = (tool: EditTool, label: string) => `
+    <button class="${editState?.tool === tool ? "active-tool" : ""}" data-edit-tool="${tool}">${label}</button>
+  `;
+
+  return `
+    <section class="panel edit-panel">
+      <div class="editor-topbar">
+        <h2>Edit screenshot</h2>
+        <button class="icon-button" id="closeEditorButton" title="Close editor" aria-label="Close editor">×</button>
+      </div>
+      <div class="tool-row">
+        ${toolButton("crop", "Crop")}
+        ${toolButton("rect", "Box")}
+        ${toolButton("arrow", "Arrow")}
+        ${toolButton("blur", "Blur")}
+        ${toolButton("text", "Text")}
+      </div>
+      <canvas id="screenshotEditor" class="editor-canvas" aria-label="Screenshot editor"></canvas>
+      <div class="actions">
+        <button id="undoEditButton" ${editState.history.length < 2 ? "disabled" : ""}>Undo</button>
+        <button id="resetEditButton" ${screenshot.originalDataUrl ? "" : "disabled"}>Reset</button>
+        <button class="primary" id="saveEditButton">Save</button>
+        <button id="cancelEditButton">Cancel</button>
+      </div>
+    </section>
+  `;
 }
 
 function renderReportsList(): string {
@@ -216,11 +295,17 @@ function bindEvents(): void {
   document.querySelector("#settingsButton")?.addEventListener("click", () => {
     void chrome.runtime.openOptionsPage();
   });
-  document.querySelector("#screenshotButton")?.addEventListener("click", () => {
-    void runCapture({ type: "CAPTURE_SCREENSHOT" });
+  document.querySelector("#screenshotFullButton")?.addEventListener("click", () => {
+    void runCapture({ type: "CAPTURE_SCREENSHOT", area: "full" });
   });
-  document.querySelector("#videoButton")?.addEventListener("click", () => {
-    void runCapture({ type: "START_VIDEO_CAPTURE" });
+  document.querySelector("#screenshotRegionButton")?.addEventListener("click", () => {
+    void runCapture({ type: "CAPTURE_SCREENSHOT", area: "region" });
+  });
+  document.querySelector("#videoFullButton")?.addEventListener("click", () => {
+    void runCapture({ type: "START_VIDEO_CAPTURE", area: "full" });
+  });
+  document.querySelector("#videoRegionButton")?.addEventListener("click", () => {
+    void runCapture({ type: "START_VIDEO_CAPTURE", area: "region" });
   });
   document.querySelector("#stopRecordingButton")?.addEventListener("click", () => {
     if (session) void request({ type: "STOP_VIDEO_CAPTURE", sessionId: session.id });
@@ -237,14 +322,56 @@ function bindEvents(): void {
   document.querySelector("#templateButton")?.addEventListener("click", () => {
     if (!session) return;
     report = buildTemplateReport({ session, steps, notes });
-    statusMessage = "Template report refreshed.";
-    render();
+    void closeReportFocus("Template report refreshed. Report closed.");
   });
-  document.querySelector("#addScreenshotButton")?.addEventListener("click", () => void addScreenshot());
-  document.querySelector("#addVideoButton")?.addEventListener("click", () => void addVideo());
+  document
+    .querySelector("#addScreenshotFullButton")
+    ?.addEventListener("click", () => void addScreenshot("full"));
+  document
+    .querySelector("#addScreenshotRegionButton")
+    ?.addEventListener("click", () => void addScreenshot("region"));
+  document
+    .querySelector("#addVideoFullButton")
+    ?.addEventListener("click", () => void addVideo("full"));
+  document
+    .querySelector("#addVideoRegionButton")
+    ?.addEventListener("click", () => void addVideo("region"));
   document.querySelector("#aiButton")?.addEventListener("click", () => void generateReport());
   document.querySelector("#copyButton")?.addEventListener("click", () => void copyReport());
   document.querySelector("#downloadButton")?.addEventListener("click", () => void downloadBundle());
+  document.querySelector("#doneButton")?.addEventListener("click", () => {
+    void closeReportFocus("Report closed. New captures will start a fresh report.");
+  });
+  document.querySelector("#closeEditorButton")?.addEventListener("click", closeEditor);
+  document.querySelector("#cancelEditButton")?.addEventListener("click", closeEditor);
+  document.querySelector("#undoEditButton")?.addEventListener("click", undoEdit);
+  document.querySelector("#resetEditButton")?.addEventListener("click", resetEdit);
+  document.querySelector("#saveEditButton")?.addEventListener("click", () => void saveEdit());
+  document.querySelectorAll("[data-edit-tool]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!editState) return;
+      editState.tool = button.getAttribute("data-edit-tool") as EditTool;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-edit-screenshot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const screenshotId = button.getAttribute("data-edit-screenshot");
+      if (screenshotId) openEditor(screenshotId);
+    });
+  });
+  document.querySelectorAll("[data-download-screenshot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const screenshotId = button.getAttribute("data-download-screenshot");
+      if (screenshotId) downloadScreenshot(screenshotId);
+    });
+  });
+  document.querySelectorAll("[data-download-recording]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const recordingId = button.getAttribute("data-download-recording");
+      if (recordingId) downloadRecording(recordingId);
+    });
+  });
   document.querySelectorAll("[data-open-session]").forEach((button) => {
     button.addEventListener("click", () => {
       const sessionId = button.getAttribute("data-open-session");
@@ -253,18 +380,22 @@ function bindEvents(): void {
   });
 }
 
-async function addScreenshot(): Promise<void> {
+async function addScreenshot(area: CaptureArea): Promise<void> {
   if (!session) return;
-  busyLabel = "Adding...";
+  busyLabel = area === "region" ? "Select an area..." : "Adding...";
   statusMessage = "";
   render();
   try {
     session = await request<CaptureSession>({
       type: "ADD_SCREENSHOT_TO_SESSION",
-      sessionId: session.id
+      sessionId: session.id,
+      area
     });
     report = buildTemplateReport({ session, steps, notes });
-    statusMessage = "Screenshot attached to this report.";
+    statusMessage =
+      area === "region"
+        ? "Selected-area screenshot attached to this report."
+        : "Screenshot attached to this report.";
     await refreshSessions();
   } catch (error) {
     statusMessage = error instanceof Error ? error.message : String(error);
@@ -274,18 +405,22 @@ async function addScreenshot(): Promise<void> {
   }
 }
 
-async function addVideo(): Promise<void> {
+async function addVideo(area: CaptureArea): Promise<void> {
   if (!session) return;
-  busyLabel = "Starting...";
+  busyLabel = area === "region" ? "Select an area..." : "Starting...";
   statusMessage = "";
   render();
   try {
     session = await request<CaptureSession>({
       type: "ADD_VIDEO_TO_SESSION",
-      sessionId: session.id
+      sessionId: session.id,
+      area
     });
     report = buildTemplateReport({ session, steps, notes });
-    statusMessage = "Video recording started for this report.";
+    statusMessage =
+      area === "region"
+        ? "Selected-area video recording started for this report."
+        : "Video recording started for this report.";
     await refreshSessions();
     startPolling();
   } catch (error) {
@@ -297,11 +432,13 @@ async function addVideo(): Promise<void> {
 }
 
 async function runCapture(message: RuntimeMessage): Promise<void> {
-  busyLabel = "Capturing...";
+  const area = "area" in message ? message.area : undefined;
+  busyLabel = area === "region" ? "Select an area..." : "Capturing...";
   statusMessage = "";
   render();
   try {
     session = await request<CaptureSession>(message);
+    editState = undefined;
     report = session ? buildTemplateReport({ session, steps, notes }) : "";
     await refreshSessions();
     startPolling();
@@ -315,6 +452,7 @@ async function runCapture(message: RuntimeMessage): Promise<void> {
 
 async function openSession(sessionId: string): Promise<void> {
   session = await request<CaptureSession>({ type: "SET_ACTIVE_SESSION", sessionId });
+  editState = undefined;
   report = session ? buildTemplateReport({ session, steps, notes }) : "";
   statusMessage = "Report reopened. New attachments will be added here.";
   await refreshSessions();
@@ -351,8 +489,7 @@ async function generateReport(): Promise<void> {
 
 async function copyReport(): Promise<void> {
   await navigator.clipboard.writeText(report);
-  statusMessage = "Markdown copied.";
-  render();
+  await closeReportFocus("Markdown copied. Report closed.");
 }
 
 async function downloadBundle(): Promise<void> {
@@ -361,8 +498,262 @@ async function downloadBundle(): Promise<void> {
   const zip = await buildReportZip({ session, report });
   const url = URL.createObjectURL(zip);
   downloadDataUrl(`${basename}.zip`, url, true);
-  statusMessage = "ZIP download started.";
+  await closeReportFocus("ZIP download started. Report closed.");
+}
+
+function openEditor(screenshotId: string): void {
+  const screenshot = getScreenshot(screenshotId);
+  if (!screenshot) return;
+  editState = {
+    screenshotId,
+    history: [screenshot.dataUrl],
+    tool: "rect"
+  };
+  statusMessage = "";
   render();
+}
+
+function closeEditor(): void {
+  editState = undefined;
+  render();
+}
+
+function undoEdit(): void {
+  if (!editState || editState.history.length < 2) return;
+  editState.history.pop();
+  render();
+}
+
+function resetEdit(): void {
+  if (!editState) return;
+  const screenshot = getScreenshot(editState.screenshotId);
+  const original = screenshot?.originalDataUrl;
+  if (!original) return;
+  editState.history = [original];
+  render();
+}
+
+async function saveEdit(): Promise<void> {
+  if (!session || !editState) return;
+  const screenshot = getScreenshot(editState.screenshotId);
+  if (!screenshot) return;
+  const editedDataUrl = editState.history.at(-1);
+  if (!editedDataUrl) return;
+
+  const screenshots = (session.screenshots ?? []).map((item) =>
+    item.id === screenshot.id
+      ? {
+          ...item,
+          dataUrl: editedDataUrl,
+          originalDataUrl: item.originalDataUrl ?? item.dataUrl,
+          editedAt: new Date().toISOString()
+        }
+      : item
+  );
+
+  session = await request<CaptureSession>({
+    type: "UPDATE_SESSION",
+    sessionId: session.id,
+    patch: {
+      screenshots,
+      screenshotDataUrl: screenshots.at(-1)?.dataUrl
+    }
+  });
+  report = buildTemplateReport({ session, steps, notes });
+  await closeReportFocus("Screenshot edits saved. Report closed.");
+}
+
+async function closeReportFocus(message = ""): Promise<void> {
+  const sessionId = session?.id;
+  if (sessionId) {
+    await request({ type: "CLEAR_ACTIVE_SESSION", sessionId });
+  } else {
+    await request({ type: "CLEAR_ACTIVE_SESSION" });
+  }
+  if (pollHandle) {
+    window.clearInterval(pollHandle);
+    pollHandle = undefined;
+  }
+  session = undefined;
+  editState = undefined;
+  steps = "";
+  notes = "";
+  report = "";
+  busyLabel = "";
+  statusMessage = message;
+  await refreshSessions();
+  render();
+}
+
+function downloadScreenshot(screenshotId: string): void {
+  const screenshot = getScreenshot(screenshotId);
+  if (!screenshot) return;
+  const index = (session?.screenshots ?? []).findIndex((item) => item.id === screenshotId) + 1;
+  downloadDataUrl(`screenshot2bug-screenshot-${index || 1}.png`, screenshot.dataUrl);
+}
+
+function downloadRecording(recordingId: string): void {
+  const recording = (session?.recordings ?? []).find((item) => item.id === recordingId);
+  if (!recording) return;
+  const index = (session?.recordings ?? []).findIndex((item) => item.id === recordingId) + 1;
+  downloadDataUrl(`screenshot2bug-recording-${index || 1}.webm`, recording.dataUrl);
+}
+
+function getScreenshot(screenshotId: string): EvidenceAttachment | undefined {
+  return (session?.screenshots ?? []).find((item) => item.id === screenshotId);
+}
+
+function mountEditor(): void {
+  if (!editState) return;
+  const canvas = document.querySelector<HTMLCanvasElement>("#screenshotEditor");
+  if (!canvas) return;
+  const dataUrl = editState.history.at(-1);
+  if (!dataUrl) return;
+
+  const image = new Image();
+  image.onload = () => {
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(image, 0, 0);
+  };
+  image.src = dataUrl;
+
+  let start: { x: number; y: number } | undefined;
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!editState) return;
+    const point = canvasPoint(canvas, event);
+    if (editState.tool === "text") {
+      const value = window.prompt("Text to add");
+      if (!value) return;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.font = `${Math.max(18, Math.round(canvas.width / 36))}px system-ui, sans-serif`;
+      context.lineWidth = Math.max(3, Math.round(canvas.width / 260));
+      context.strokeStyle = "#ffffff";
+      context.fillStyle = "#b23a26";
+      context.strokeText(value, point.x, point.y);
+      context.fillText(value, point.x, point.y);
+      pushEditSnapshot(canvas);
+      return;
+    }
+    start = point;
+    canvas.setPointerCapture(event.pointerId);
+  });
+
+  canvas.addEventListener("pointerup", (event) => {
+    if (!editState || !start) return;
+    const end = canvasPoint(canvas, event);
+    applyEditGesture(canvas, editState.tool, start, end);
+    start = undefined;
+  });
+}
+
+function applyEditGesture(
+  canvas: HTMLCanvasElement,
+  tool: EditTool,
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+): void {
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  const rect = normalizeRect(start, end);
+  if ((tool === "crop" || tool === "blur") && (rect.width < 4 || rect.height < 4)) return;
+
+  if (tool === "crop") {
+    const image = context.getImageData(rect.x, rect.y, rect.width, rect.height);
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    canvas.getContext("2d")?.putImageData(image, 0, 0);
+    pushEditSnapshot(canvas);
+    return;
+  }
+
+  if (tool === "blur") {
+    context.save();
+    context.filter = "blur(8px)";
+    context.drawImage(canvas, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
+    context.restore();
+    context.strokeStyle = "rgba(255,255,255,.75)";
+    context.lineWidth = Math.max(2, Math.round(canvas.width / 420));
+    context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    pushEditSnapshot(canvas);
+    return;
+  }
+
+  context.save();
+  context.strokeStyle = "#b23a26";
+  context.fillStyle = "#b23a26";
+  context.lineWidth = Math.max(4, Math.round(canvas.width / 220));
+  context.lineCap = "round";
+  context.lineJoin = "round";
+
+  if (tool === "rect") {
+    context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  }
+
+  if (tool === "arrow") {
+    drawArrow(context, start.x, start.y, end.x, end.y, context.lineWidth);
+  }
+
+  context.restore();
+  pushEditSnapshot(canvas);
+}
+
+function drawArrow(
+  context: CanvasRenderingContext2D,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  lineWidth: number
+): void {
+  const angle = Math.atan2(endY - startY, endX - startX);
+  const headLength = Math.max(14, lineWidth * 4);
+  context.beginPath();
+  context.moveTo(startX, startY);
+  context.lineTo(endX, endY);
+  context.lineTo(
+    endX - headLength * Math.cos(angle - Math.PI / 6),
+    endY - headLength * Math.sin(angle - Math.PI / 6)
+  );
+  context.moveTo(endX, endY);
+  context.lineTo(
+    endX - headLength * Math.cos(angle + Math.PI / 6),
+    endY - headLength * Math.sin(angle + Math.PI / 6)
+  );
+  context.stroke();
+}
+
+function pushEditSnapshot(canvas: HTMLCanvasElement): void {
+  if (!editState) return;
+  editState.history = [...editState.history, canvas.toDataURL("image/png")];
+  render();
+}
+
+function canvasPoint(
+  canvas: HTMLCanvasElement,
+  event: PointerEvent
+): { x: number; y: number } {
+  const bounds = canvas.getBoundingClientRect();
+  return {
+    x: Math.round(((event.clientX - bounds.left) / bounds.width) * canvas.width),
+    y: Math.round(((event.clientY - bounds.top) / bounds.height) * canvas.height)
+  };
+}
+
+function normalizeRect(
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y)
+  };
 }
 
 function downloadDataUrl(filename: string, url: string, revoke = false): void {

@@ -1,47 +1,153 @@
-import {
-  appendConsoleEntry,
-  getConsoleEntries,
-  getSession,
-  getSortedSessions,
-  normalizeSession,
-  patchSession,
-  saveSession,
-  setActiveSession
-} from "./shared.js";
+// src/shared/types.ts
+var STORAGE_KEYS = {
+  latestSessionId: "latestSessionId",
+  settings: "settings",
+  sessions: "sessions",
+  consolePrefix: "console:"
+};
 
+// src/shared/storage.ts
+async function getSessions() {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.sessions);
+  return result[STORAGE_KEYS.sessions] ?? {};
+}
+async function getSortedSessions() {
+  const sessions = await getSessions();
+  return Object.values(sessions).map(normalizeSession).filter((session) => !!session).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+async function getSession(sessionId) {
+  const latest = await chrome.storage.local.get(STORAGE_KEYS.latestSessionId);
+  const id = sessionId ?? latest[STORAGE_KEYS.latestSessionId];
+  if (!id) return void 0;
+  const sessions = await getSessions();
+  return normalizeSession(sessions[id]);
+}
+async function saveSession(session) {
+  const sessions = await getSessions();
+  sessions[session.id] = normalizeSession(session) ?? session;
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.sessions]: sessions,
+    [STORAGE_KEYS.latestSessionId]: session.id
+  });
+}
+async function patchSession(sessionId, patch) {
+  const sessions = await getSessions();
+  const existing = normalizeSession(sessions[sessionId]);
+  if (!existing) return void 0;
+  const updated = normalizeSession({
+    ...existing,
+    ...patch,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  }) ?? existing;
+  sessions[sessionId] = updated;
+  await chrome.storage.local.set({ [STORAGE_KEYS.sessions]: sessions });
+  return updated;
+}
+async function setActiveSession(sessionId) {
+  const sessions = await getSessions();
+  const session = sessions[sessionId];
+  if (!session) throw new Error("Report not found.");
+  await chrome.storage.local.set({ [STORAGE_KEYS.latestSessionId]: sessionId });
+  return normalizeSession(session) ?? session;
+}
+async function clearActiveSession(sessionId) {
+  if (!sessionId) {
+    await chrome.storage.local.remove(STORAGE_KEYS.latestSessionId);
+    return;
+  }
+  const latest = await chrome.storage.local.get(STORAGE_KEYS.latestSessionId);
+  const focusedId = latest[STORAGE_KEYS.latestSessionId];
+  if (focusedId === sessionId) {
+    await chrome.storage.local.remove(STORAGE_KEYS.latestSessionId);
+  }
+}
+async function appendConsoleEntry(tabId, entry) {
+  const key = `${STORAGE_KEYS.consolePrefix}${tabId}`;
+  const result = await chrome.storage.local.get(key);
+  const current = result[key] ?? [];
+  await chrome.storage.local.set({ [key]: [...current.slice(-49), entry] });
+}
+async function getConsoleEntries(tabId) {
+  if (typeof tabId !== "number") return [];
+  const key = `${STORAGE_KEYS.consolePrefix}${tabId}`;
+  const result = await chrome.storage.local.get(key);
+  return result[key] ?? [];
+}
+function normalizeSession(session) {
+  if (!session) return session;
+  const screenshots = [...session.screenshots ?? []];
+  const recordings = [...session.recordings ?? []];
+  if (session.screenshotDataUrl && !screenshots.some((item) => item.dataUrl === session.screenshotDataUrl)) {
+    screenshots.push({
+      id: "legacy-screenshot",
+      dataUrl: session.screenshotDataUrl,
+      createdAt: session.updatedAt || session.createdAt,
+      url: session.metadata?.url,
+      title: session.metadata?.title
+    });
+  }
+  if (session.recordingDataUrl && !recordings.some((item) => item.dataUrl === session.recordingDataUrl)) {
+    recordings.push({
+      id: "legacy-recording",
+      dataUrl: session.recordingDataUrl,
+      mimeType: session.recordingMimeType || "video/webm",
+      createdAt: session.updatedAt || session.createdAt,
+      url: session.metadata?.url,
+      title: session.metadata?.title
+    });
+  }
+  return {
+    ...session,
+    screenshots,
+    recordings,
+    screenshotDataUrl: screenshots.at(-1)?.dataUrl,
+    recordingDataUrl: recordings.at(-1)?.dataUrl,
+    recordingMimeType: recordings.at(-1)?.mimeType
+  };
+}
+
+// src/background/service-worker.ts
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "capture-screenshot") void createScreenshotSession(true);
-  if (command === "attach-screenshot") void attachScreenshotFromShortcut();
-  if (command === "capture-video") void createVideoSession(true);
-  if (command === "attach-video") void attachVideoFromShortcut();
+  if (command === "capture-screenshot-full") {
+    void createScreenshotSession(true, "full");
+  }
+  if (command === "capture-screenshot-region") {
+    void createScreenshotSession(true, "region");
+  }
+  if (command === "capture-video-full") {
+    void createVideoSession(true, "full");
+  }
+  if (command === "capture-video-region") {
+    void createVideoSession(true, "region");
+  }
 });
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  void handleMessage(message, sender)
-    .then((data) => sendResponse({ ok: true, data }))
-    .catch((error) =>
-      sendResponse({
+chrome.runtime.onMessage.addListener(
+  (message, sender, sendResponse) => {
+    void handleMessage(message, sender).then((data) => sendResponse({ ok: true, data })).catch(
+      (error) => sendResponse({
         ok: false,
         error: error instanceof Error ? error.message : String(error)
       })
     );
-  return true;
-});
-
+    return true;
+  }
+);
 async function handleMessage(message, sender) {
   switch (message.type) {
     case "CAPTURE_SCREENSHOT":
-      return createScreenshotSession(false);
+      return createScreenshotSession(false, message.area ?? "full");
     case "START_VIDEO_CAPTURE":
-      return createVideoSession(false);
+      return createVideoSession(false, message.area ?? "full");
     case "ADD_SCREENSHOT_TO_SESSION":
-      return addScreenshotToSession(message.sessionId);
+      return addScreenshotToSession(message.sessionId, message.area ?? "full");
     case "ADD_VIDEO_TO_SESSION":
-      return addVideoToSession(message.sessionId);
+      return addVideoToSession(message.sessionId, message.area ?? "full");
     case "GET_SESSIONS":
       return getSortedSessions();
     case "SET_ACTIVE_SESSION":
       return setActiveSession(message.sessionId);
+    case "CLEAR_ACTIVE_SESSION":
+      return clearActiveSession(message.sessionId);
     case "STOP_VIDEO_CAPTURE":
       await refreshSessionConsole(message.sessionId);
       await chrome.runtime.sendMessage({
@@ -57,75 +163,53 @@ async function handleMessage(message, sender) {
       if (typeof sender.tab?.id === "number") {
         await appendConsoleEntry(sender.tab.id, message.entry);
       }
-      return undefined;
+      return void 0;
     case "OFFSCREEN_RECORDING_COMPLETE":
-      return completeRecordingSession(message.sessionId, message.dataUrl, message.mimeType);
+      return completeRecordingSession(
+        message.sessionId,
+        message.dataUrl,
+        message.mimeType,
+        message.region
+      );
     case "OFFSCREEN_RECORDING_ERROR":
       return patchSession(message.sessionId, {
         status: "failed",
         error: message.error
       });
     default:
-      return undefined;
+      return void 0;
   }
 }
-
-async function attachScreenshotFromShortcut() {
-  const session = await getSession();
-  if (!session) {
-    const created = await createScreenshotSession(false);
-    await patchSession(created.id, {
-      notice: "No active report existed, so a new screenshot report was created."
-    });
-    await openComposerWindow(created.id);
-    return;
-  }
-  await addScreenshotToSession(session.id);
-  await openComposerWindow(session.id);
-}
-
-async function attachVideoFromShortcut() {
-  const session = await getSession();
-  if (!session) {
-    const created = await createVideoSession(false);
-    await patchSession(created.id, {
-      notice: "No active report existed, so a new video report was created."
-    });
-    await openComposerWindow(created.id);
-    return;
-  }
-  await addVideoToSession(session.id);
-  await openComposerWindow(session.id);
-}
-
-async function addScreenshotToSession(sessionId) {
+async function addScreenshotToSession(sessionId, area) {
   const session = normalizeSession(await getSession(sessionId));
   if (!session) throw new Error("No capture session found.");
   const tab = await getActiveTab();
+  const region = area === "region" ? await selectRegion(tab.id) : void 0;
   const [metadata, consoleErrors, screenshotDataUrl] = await Promise.all([
     collectPageMetadata(tab.id),
     getConsoleEntries(tab.id),
     captureVisibleTab(tab.windowId)
   ]);
+  const dataUrl = region ? await cropImageDataUrl(screenshotDataUrl, region) : screenshotDataUrl;
   const screenshot = {
     id: crypto.randomUUID(),
-    dataUrl: screenshotDataUrl,
-    createdAt: new Date().toISOString(),
+    dataUrl,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     url: metadata.url,
-    title: metadata.title
+    title: metadata.title,
+    captureArea: area,
+    region
   };
-
   return patchSession(sessionId, {
     tabId: tab.id,
     windowId: tab.windowId,
     metadata,
     consoleErrors,
-    screenshots: [...(session.screenshots ?? []), screenshot],
-    screenshotDataUrl
+    screenshots: [...session.screenshots ?? [], screenshot],
+    screenshotDataUrl: dataUrl
   });
 }
-
-async function completeRecordingSession(sessionId, dataUrl, mimeType) {
+async function completeRecordingSession(sessionId, dataUrl, mimeType, region) {
   await refreshSessionConsole(sessionId);
   const session = normalizeSession(await getSession(sessionId));
   if (!session) throw new Error("No capture session found.");
@@ -133,47 +217,46 @@ async function completeRecordingSession(sessionId, dataUrl, mimeType) {
     id: crypto.randomUUID(),
     dataUrl,
     mimeType,
-    createdAt: new Date().toISOString(),
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     url: session.metadata?.url,
-    title: session.metadata?.title
+    title: session.metadata?.title,
+    captureArea: region ? "region" : "full",
+    region
   };
   return patchSession(sessionId, {
     status: "ready",
-    recordings: [...(session.recordings ?? []), recording],
+    recordings: [...session.recordings ?? [], recording],
     recordingDataUrl: dataUrl,
     recordingMimeType: mimeType
   });
 }
-
-async function addVideoToSession(sessionId) {
+async function addVideoToSession(sessionId, area) {
   const session = await getSession(sessionId);
   if (!session) throw new Error("No capture session found.");
   const tab = await getActiveTab();
-
+  const region = area === "region" ? await selectRegion(tab.id) : void 0;
   try {
     const [metadata, consoleErrors] = await Promise.all([
       collectPageMetadata(tab.id),
       getConsoleEntries(tab.id)
     ]);
-
     await patchSession(sessionId, {
       status: "recording",
       tabId: tab.id,
       windowId: tab.windowId,
       metadata,
       consoleErrors,
-      notice: "Recording video for the current report."
+      notice: area === "region" ? "Recording selected area for the current report." : "Recording video for the current report."
     });
-
     await ensureOffscreenDocument();
     const streamId = await getTabMediaStreamId(tab.id);
     await chrome.runtime.sendMessage({
       type: "OFFSCREEN_START_RECORDING",
       streamId,
-      sessionId
+      sessionId,
+      region
     });
-
-    return (await getSession(sessionId)) ?? session;
+    return await getSession(sessionId) ?? session;
   } catch (error) {
     return patchSession(sessionId, {
       status: "failed",
@@ -181,19 +264,25 @@ async function addVideoToSession(sessionId) {
     });
   }
 }
-
-async function createScreenshotSession(openComposer) {
+async function refreshSessionConsole(sessionId) {
+  const session = await getSession(sessionId);
+  if (typeof session?.tabId !== "number") return;
+  await patchSession(sessionId, {
+    consoleErrors: await getConsoleEntries(session.tabId)
+  });
+}
+async function createScreenshotSession(openComposer, area) {
   const tab = await getActiveTab();
+  const region = area === "region" ? await selectRegion(tab.id) : void 0;
   const session = await createBaseSession("screenshot", tab);
   await saveSession(session);
-
   try {
     const [metadata, consoleErrors, screenshotDataUrl] = await Promise.all([
       collectPageMetadata(tab.id),
       getConsoleEntries(tab.id),
       captureVisibleTab(tab.windowId)
     ]);
-
+    const dataUrl = region ? await cropImageDataUrl(screenshotDataUrl, region) : screenshotDataUrl;
     const updated = await patchSession(session.id, {
       status: "ready",
       metadata,
@@ -201,15 +290,16 @@ async function createScreenshotSession(openComposer) {
       screenshots: [
         {
           id: crypto.randomUUID(),
-          dataUrl: screenshotDataUrl,
-          createdAt: new Date().toISOString(),
+          dataUrl,
+          createdAt: (/* @__PURE__ */ new Date()).toISOString(),
           url: metadata.url,
-          title: metadata.title
+          title: metadata.title,
+          captureArea: area,
+          region
         }
       ],
-      screenshotDataUrl
+      screenshotDataUrl: dataUrl
     });
-
     if (openComposer) await openComposerWindow(session.id);
     return updated ?? session;
   } catch (error) {
@@ -221,29 +311,31 @@ async function createScreenshotSession(openComposer) {
     return failed ?? session;
   }
 }
-
-async function createVideoSession(openComposer) {
+async function createVideoSession(openComposer, area) {
   const tab = await getActiveTab();
+  const region = area === "region" ? await selectRegion(tab.id) : void 0;
   const session = await createBaseSession("video", tab);
   await saveSession(session);
-
   try {
     const [metadata, consoleErrors] = await Promise.all([
       collectPageMetadata(tab.id),
       getConsoleEntries(tab.id)
     ]);
-
-    await patchSession(session.id, { status: "recording", metadata, consoleErrors });
+    await patchSession(session.id, {
+      status: "recording",
+      metadata,
+      consoleErrors
+    });
     await ensureOffscreenDocument();
     const streamId = await getTabMediaStreamId(tab.id);
     await chrome.runtime.sendMessage({
       type: "OFFSCREEN_START_RECORDING",
       streamId,
-      sessionId: session.id
+      sessionId: session.id,
+      region
     });
-
     if (openComposer) await openComposerWindow(session.id);
-    return (await getSession(session.id)) ?? session;
+    return await getSession(session.id) ?? session;
   } catch (error) {
     const failed = await patchSession(session.id, {
       status: "failed",
@@ -253,9 +345,8 @@ async function createVideoSession(openComposer) {
     return failed ?? session;
   }
 }
-
 async function createBaseSession(mode, tab) {
-  const now = new Date().toISOString();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
   return {
     id: crypto.randomUUID(),
     mode,
@@ -267,21 +358,71 @@ async function createBaseSession(mode, tab) {
     consoleErrors: []
   };
 }
-
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.windowId) throw new Error("No active tab found.");
+  if (!tab?.id || !tab.windowId) {
+    throw new Error("No active tab found.");
+  }
   if (tab.url?.startsWith("chrome://") || tab.url?.startsWith("chrome-extension://")) {
     throw new Error("Chrome internal pages cannot be captured.");
   }
   return tab;
 }
-
 async function captureVisibleTab(windowId) {
-  if (typeof windowId !== "number") throw new Error("Cannot capture without an active window.");
+  if (typeof windowId !== "number") {
+    throw new Error("Cannot capture without an active window.");
+  }
   return chrome.tabs.captureVisibleTab(windowId, { format: "png" });
 }
-
+async function selectRegion(tabId) {
+  if (typeof tabId !== "number") throw new Error("Cannot select a region without an active tab.");
+  const response = await chrome.tabs.sendMessage(tabId, {
+    type: "START_REGION_SELECTION"
+  });
+  if (!isCaptureRegion(response)) {
+    throw new Error(response?.error || "Region selection canceled.");
+  }
+  return response;
+}
+function isCaptureRegion(value) {
+  return !!value && typeof value.x === "number" && typeof value.y === "number" && typeof value.width === "number" && typeof value.height === "number";
+}
+async function cropImageDataUrl(dataUrl, region) {
+  const image = await createImageBitmap(await dataUrlToBlob(dataUrl));
+  const scaleX = image.width / region.viewportWidth;
+  const scaleY = image.height / region.viewportHeight;
+  const sourceX = Math.round(region.x * scaleX);
+  const sourceY = Math.round(region.y * scaleY);
+  const sourceWidth = Math.max(1, Math.round(region.width * scaleX));
+  const sourceHeight = Math.max(1, Math.round(region.height * scaleY));
+  const canvas = new OffscreenCanvas(sourceWidth, sourceHeight);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not crop screenshot.");
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    Math.min(sourceWidth, image.width - sourceX),
+    Math.min(sourceHeight, image.height - sourceY),
+    0,
+    0,
+    sourceWidth,
+    sourceHeight
+  );
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+  return blobToDataUrl(blob);
+}
+async function dataUrlToBlob(dataUrl) {
+  return fetch(dataUrl).then((response) => response.blob());
+}
+async function blobToDataUrl(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
 async function collectPageMetadata(tabId) {
   if (typeof tabId !== "number") throw new Error("Cannot inspect an unknown tab.");
   const [result] = await chrome.scripting.executeScript({
@@ -308,7 +449,6 @@ async function collectPageMetadata(tabId) {
   if (!result?.result) throw new Error("Could not collect page metadata.");
   return result.result;
 }
-
 async function getTabMediaStreamId(tabId) {
   if (typeof tabId !== "number") throw new Error("Cannot record an unknown tab.");
   return new Promise((resolve, reject) => {
@@ -322,28 +462,16 @@ async function getTabMediaStreamId(tabId) {
     });
   });
 }
-
 async function ensureOffscreenDocument() {
-  const hasDocument = chrome.offscreen.hasDocument
-    ? await chrome.offscreen.hasDocument()
-    : false;
+  const offscreen = chrome.offscreen;
+  const hasDocument = offscreen.hasDocument ? await offscreen.hasDocument() : false;
   if (hasDocument) return;
-
   await chrome.offscreen.createDocument({
     url: "offscreen.html",
     reasons: ["USER_MEDIA"],
     justification: "Record the active tab for a video bug report."
   });
 }
-
-async function refreshSessionConsole(sessionId) {
-  const session = await getSession(sessionId);
-  if (typeof session?.tabId !== "number") return;
-  await patchSession(sessionId, {
-    consoleErrors: await getConsoleEntries(session.tabId)
-  });
-}
-
 async function openComposerWindow(sessionId) {
   await chrome.windows.create({
     url: chrome.runtime.getURL(`popup.html?sessionId=${sessionId}`),

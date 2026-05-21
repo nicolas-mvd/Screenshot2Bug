@@ -38,10 +38,12 @@ No OpenAI API key is bundled with the extension. Users add their own key from th
 
 ## Capture Modes
 
-- New screenshot report: popup button or `Option+Shift+S`
-- Attach screenshot to current report: popup button or `Control+Shift+S`
-- New video report: popup button or `Option+Shift+V`
-- Attach video to current report: popup button or `Control+Shift+V`
+- Full-tab screenshot: popup button or `Option+Shift+S`
+- Selected-area screenshot: popup button or `Option+Shift+A`
+- Full-tab video: popup button or `Option+Shift+V`
+- Selected-area video: popup button or `Option+Shift+R`
+
+Existing reports can be reopened from the popup and extended with full-tab or selected-area screenshots/videos. Screenshot evidence can be edited with crop, box, arrow, blur, and text tools before exporting. Saving or exporting a report closes its focus so the next capture starts a fresh report.
 
 Chrome users can remap these shortcuts at `chrome://extensions/shortcuts`.
 

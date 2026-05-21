@@ -96,7 +96,9 @@ function createZip(files: ZipFile[]): Blob {
   endView.setUint32(12, centralSize, true);
   endView.setUint32(16, offset, true);
 
-  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+  return new Blob([...localParts, ...centralParts, end] as BlobPart[], {
+    type: "application/zip"
+  });
 }
 
 function textBytes(value: string): Uint8Array {

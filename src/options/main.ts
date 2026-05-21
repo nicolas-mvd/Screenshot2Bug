@@ -5,6 +5,7 @@ import type { Settings } from "../shared/types";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root.");
+const root = app;
 
 let settings: Settings = {};
 let message = "";
@@ -17,7 +18,7 @@ async function init(): Promise<void> {
 }
 
 function render(): void {
-  app.innerHTML = `
+  root.innerHTML = `
     <section class="shell options-shell">
       <header class="topbar">
         <div>
@@ -44,7 +45,7 @@ function render(): void {
 
       <section class="panel">
         <h2>Shortcuts</h2>
-        <p class="muted">Defaults are Option+Shift+S/V for new reports and Control+Shift+S/V for attaching evidence. Chrome lets you remap them from the extensions shortcuts page.</p>
+        <p class="muted">Defaults are Option+Shift+S for full-tab screenshots, Option+Shift+A for selected-area screenshots, Option+Shift+V for full-tab videos, and Option+Shift+R for selected-area videos. Chrome lets you remap them from the extensions shortcuts page.</p>
         <button id="shortcutsButton">Open Chrome shortcuts</button>
       </section>
     </section>

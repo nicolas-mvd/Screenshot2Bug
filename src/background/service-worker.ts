@@ -70,6 +70,7 @@ async function handleMessage(message: RuntimeMessage, sender: chrome.runtime.Mes
       return clearActiveSession(message.sessionId);
     case "STOP_VIDEO_CAPTURE":
       await refreshSessionConsole(message.sessionId);
+      await setRecordingControlsState(message.sessionId, "saving");
       await chrome.runtime.sendMessage({
         type: "OFFSCREEN_STOP_RECORDING",
         sessionId: message.sessionId
@@ -92,6 +93,7 @@ async function handleMessage(message: RuntimeMessage, sender: chrome.runtime.Mes
         message.region
       );
     case "OFFSCREEN_RECORDING_ERROR":
+      await hideRecordingControlsForSession(message.sessionId);
       return patchSession(message.sessionId, {
         status: "failed",
         error: message.error
@@ -175,6 +177,9 @@ async function completeRecordingSession(
   await refreshSessionConsole(sessionId);
   const session = normalizeSession(await getSession(sessionId));
   if (!session) throw new Error("No capture session found.");
+  if (typeof session.tabId === "number") {
+    await hideRecordingControls(session.tabId, sessionId);
+  }
   const recording = {
     id: crypto.randomUUID(),
     dataUrl,
@@ -228,6 +233,9 @@ async function addVideoToSession(
       sessionId,
       region
     } satisfies RuntimeMessage);
+    if (region && typeof tab.id === "number") {
+      await showRecordingControls(tab.id, sessionId, "recording");
+    }
 
     return (await getSession(sessionId)) ?? session;
   } catch (error) {
@@ -324,6 +332,9 @@ async function createVideoSession(
       sessionId: session.id,
       region
     } satisfies RuntimeMessage);
+    if (region && typeof tab.id === "number") {
+      await showRecordingControls(tab.id, session.id, "recording");
+    }
 
     if (openComposer) await openComposerWindow(session.id);
     return (await getSession(session.id)) ?? session;
@@ -379,6 +390,48 @@ async function selectRegion(tabId?: number): Promise<CaptureRegion> {
     throw new Error(response?.error || "Region selection canceled.");
   }
   return response;
+}
+
+async function setRecordingControlsState(
+  sessionId: string,
+  state: "recording" | "saving"
+): Promise<void> {
+  const session = await getSession(sessionId);
+  if (typeof session?.tabId !== "number") return;
+  await showRecordingControls(session.tabId, sessionId, state);
+}
+
+async function hideRecordingControlsForSession(sessionId: string): Promise<void> {
+  const session = await getSession(sessionId);
+  if (typeof session?.tabId !== "number") return;
+  await hideRecordingControls(session.tabId, sessionId);
+}
+
+async function showRecordingControls(
+  tabId: number,
+  sessionId: string,
+  state: "recording" | "saving"
+): Promise<void> {
+  await sendContentMessage(tabId, {
+    type: "SHOW_RECORDING_CONTROLS",
+    sessionId,
+    state
+  });
+}
+
+async function hideRecordingControls(tabId: number, sessionId: string): Promise<void> {
+  await sendContentMessage(tabId, {
+    type: "HIDE_RECORDING_CONTROLS",
+    sessionId
+  });
+}
+
+async function sendContentMessage(tabId: number, message: RuntimeMessage): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    // The tab may have navigated or closed while the recording was running.
+  }
 }
 
 async function requestRegionSelection(

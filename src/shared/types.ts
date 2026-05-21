@@ -122,6 +122,8 @@ export type RuntimeMessage =
   | { type: "UPDATE_SESSION"; sessionId: string; patch: Partial<CaptureSession> }
   | { type: "LOG_CONSOLE_ENTRY"; entry: ConsoleEntry }
   | { type: "START_REGION_SELECTION" }
+  | { type: "SHOW_RECORDING_CONTROLS"; sessionId: string; state: "recording" | "saving" }
+  | { type: "HIDE_RECORDING_CONTROLS"; sessionId: string }
   | {
       type: "OFFSCREEN_START_RECORDING";
       streamId: string;

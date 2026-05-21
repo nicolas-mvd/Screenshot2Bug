@@ -40,7 +40,7 @@ async function startRecording(sessionId, streamId, region) {
       void notifyError(sessionId, recorderError.error?.message ?? "Recording failed.");
     };
     recorder.onstop = () => void completeRecording(sessionId);
-    recorder.start(1e3);
+    recorder.start(250);
   } catch (error) {
     await notifyError(sessionId, error instanceof Error ? error.message : String(error));
   }
@@ -48,6 +48,7 @@ async function startRecording(sessionId, streamId, region) {
 function stopRecording(sessionId) {
   if (sessionId !== currentSessionId) return;
   if (recorder && recorder.state !== "inactive") {
+    recorder.requestData();
     recorder.stop();
   } else {
     void notifyError(sessionId, "No active recording found.");
@@ -119,14 +120,14 @@ async function createCroppedStream(input, region) {
       sourceWidth,
       sourceHeight
     );
-    drawFrameHandle = requestAnimationFrame(draw);
   };
-  draw();
+  await waitForFirstFrame(draw);
+  drawFrameHandle = window.setInterval(draw, 1e3 / 30);
   return canvas.captureStream(30);
 }
 function cleanupStreams() {
   if (typeof drawFrameHandle === "number") {
-    cancelAnimationFrame(drawFrameHandle);
+    window.clearInterval(drawFrameHandle);
     drawFrameHandle = void 0;
   }
   cropVideo?.pause();
@@ -135,6 +136,10 @@ function cleanupStreams() {
   if (sourceStream !== stream) {
     sourceStream?.getTracks().forEach((track) => track.stop());
   }
+}
+function waitForFirstFrame(draw) {
+  draw();
+  return new Promise((resolve) => window.setTimeout(resolve, 50));
 }
 function waitForVideoMetadata(video) {
   return new Promise((resolve, reject) => {

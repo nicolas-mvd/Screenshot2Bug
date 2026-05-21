@@ -109,16 +109,16 @@ function normalizeSession(session) {
 // src/background/service-worker.ts
 chrome.commands.onCommand.addListener((command) => {
   if (command === "capture-screenshot-full") {
-    void createScreenshotSession(true, "full");
+    void captureScreenshot(true, "full");
   }
   if (command === "capture-screenshot-region") {
-    void createScreenshotSession(true, "region");
+    void captureScreenshot(true, "region");
   }
   if (command === "capture-video-full") {
-    void createVideoSession(true, "full");
+    void captureVideo(true, "full");
   }
   if (command === "capture-video-region") {
-    void createVideoSession(true, "region");
+    void captureVideo(true, "region");
   }
 });
 chrome.runtime.onMessage.addListener(
@@ -135,9 +135,9 @@ chrome.runtime.onMessage.addListener(
 async function handleMessage(message, sender) {
   switch (message.type) {
     case "CAPTURE_SCREENSHOT":
-      return createScreenshotSession(false, message.area ?? "full");
+      return captureScreenshot(false, message.area ?? "full");
     case "START_VIDEO_CAPTURE":
-      return createVideoSession(false, message.area ?? "full");
+      return captureVideo(false, message.area ?? "full");
     case "ADD_SCREENSHOT_TO_SESSION":
       return addScreenshotToSession(message.sessionId, message.area ?? "full");
     case "ADD_VIDEO_TO_SESSION":
@@ -179,6 +179,27 @@ async function handleMessage(message, sender) {
     default:
       return void 0;
   }
+}
+async function captureScreenshot(openComposer, area) {
+  const focused = await getSession();
+  if (focused) {
+    const updated = await addScreenshotToSession(focused.id, area);
+    if (openComposer) await openComposerWindow(focused.id);
+    return updated;
+  }
+  return createScreenshotSession(openComposer, area);
+}
+async function captureVideo(openComposer, area) {
+  const focused = await getSession();
+  if (focused) {
+    if (focused.status === "recording") {
+      throw new Error("Stop the current recording before starting another video.");
+    }
+    const updated = await addVideoToSession(focused.id, area);
+    if (openComposer) await openComposerWindow(focused.id);
+    return updated;
+  }
+  return createVideoSession(openComposer, area);
 }
 async function addScreenshotToSession(sessionId, area) {
   const session = normalizeSession(await getSession(sessionId));

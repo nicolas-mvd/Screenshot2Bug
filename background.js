@@ -107,18 +107,24 @@ function normalizeSession(session) {
 }
 
 // src/background/service-worker.ts
+var recordingControlRestoreTimers = /* @__PURE__ */ new Map();
 chrome.commands.onCommand.addListener((command) => {
   if (command === "capture-screenshot-full") {
-    void createScreenshotSession(true, "full");
+    void captureScreenshot(true, "full");
   }
   if (command === "capture-screenshot-region") {
-    void createScreenshotSession(true, "region");
+    void captureScreenshot(true, "region");
   }
   if (command === "capture-video-full") {
-    void createVideoSession(true, "full");
+    void captureVideo(true, "full");
   }
   if (command === "capture-video-region") {
-    void createVideoSession(true, "region");
+    void captureVideo(true, "region");
+  }
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status || changeInfo.url) {
+    scheduleRecordingControlsRestore(tabId);
   }
 });
 chrome.runtime.onMessage.addListener(
@@ -135,9 +141,9 @@ chrome.runtime.onMessage.addListener(
 async function handleMessage(message, sender) {
   switch (message.type) {
     case "CAPTURE_SCREENSHOT":
-      return createScreenshotSession(false, message.area ?? "full");
+      return captureScreenshot(false, message.area ?? "full");
     case "START_VIDEO_CAPTURE":
-      return createVideoSession(false, message.area ?? "full");
+      return captureVideo(false, message.area ?? "full");
     case "ADD_SCREENSHOT_TO_SESSION":
       return addScreenshotToSession(message.sessionId, message.area ?? "full");
     case "ADD_VIDEO_TO_SESSION":
@@ -150,6 +156,7 @@ async function handleMessage(message, sender) {
       return clearActiveSession(message.sessionId);
     case "STOP_VIDEO_CAPTURE":
       await refreshSessionConsole(message.sessionId);
+      await setRecordingControlsState(message.sessionId, "saving");
       await chrome.runtime.sendMessage({
         type: "OFFSCREEN_STOP_RECORDING",
         sessionId: message.sessionId
@@ -159,6 +166,11 @@ async function handleMessage(message, sender) {
       return getSession(message.sessionId);
     case "UPDATE_SESSION":
       return patchSession(message.sessionId, message.patch);
+    case "CONTENT_SCRIPT_READY":
+      if (typeof sender.tab?.id === "number") {
+        await restoreRecordingControlsForTab(sender.tab.id);
+      }
+      return void 0;
     case "LOG_CONSOLE_ENTRY":
       if (typeof sender.tab?.id === "number") {
         await appendConsoleEntry(sender.tab.id, message.entry);
@@ -172,6 +184,7 @@ async function handleMessage(message, sender) {
         message.region
       );
     case "OFFSCREEN_RECORDING_ERROR":
+      await hideRecordingControlsForSession(message.sessionId);
       return patchSession(message.sessionId, {
         status: "failed",
         error: message.error
@@ -179,6 +192,27 @@ async function handleMessage(message, sender) {
     default:
       return void 0;
   }
+}
+async function captureScreenshot(openComposer, area) {
+  const focused = await getSession();
+  if (focused) {
+    const updated = await addScreenshotToSession(focused.id, area);
+    if (openComposer) await openComposerWindow(focused.id);
+    return updated;
+  }
+  return createScreenshotSession(openComposer, area);
+}
+async function captureVideo(openComposer, area) {
+  const focused = await getSession();
+  if (focused) {
+    if (focused.status === "recording") {
+      throw new Error("Stop the current recording before starting another video.");
+    }
+    const updated = await addVideoToSession(focused.id, area);
+    if (openComposer) await openComposerWindow(focused.id);
+    return updated;
+  }
+  return createVideoSession(openComposer, area);
 }
 async function addScreenshotToSession(sessionId, area) {
   const session = normalizeSession(await getSession(sessionId));
@@ -213,6 +247,9 @@ async function completeRecordingSession(sessionId, dataUrl, mimeType, region) {
   await refreshSessionConsole(sessionId);
   const session = normalizeSession(await getSession(sessionId));
   if (!session) throw new Error("No capture session found.");
+  if (typeof session.tabId === "number") {
+    await hideRecordingControls(session.tabId, sessionId);
+  }
   const recording = {
     id: crypto.randomUUID(),
     dataUrl,
@@ -256,6 +293,9 @@ async function addVideoToSession(sessionId, area) {
       sessionId,
       region
     });
+    if (region && typeof tab.id === "number") {
+      await showRecordingControls(tab.id, sessionId, "recording");
+    }
     return await getSession(sessionId) ?? session;
   } catch (error) {
     return patchSession(sessionId, {
@@ -334,6 +374,9 @@ async function createVideoSession(openComposer, area) {
       sessionId: session.id,
       region
     });
+    if (region && typeof tab.id === "number") {
+      await showRecordingControls(tab.id, session.id, "recording");
+    }
     if (openComposer) await openComposerWindow(session.id);
     return await getSession(session.id) ?? session;
   } catch (error) {
@@ -376,13 +419,98 @@ async function captureVisibleTab(windowId) {
 }
 async function selectRegion(tabId) {
   if (typeof tabId !== "number") throw new Error("Cannot select a region without an active tab.");
-  const response = await chrome.tabs.sendMessage(tabId, {
-    type: "START_REGION_SELECTION"
-  });
+  const response = await requestRegionSelection(tabId);
   if (!isCaptureRegion(response)) {
     throw new Error(response?.error || "Region selection canceled.");
   }
   return response;
+}
+async function setRecordingControlsState(sessionId, state) {
+  const session = await getSession(sessionId);
+  if (typeof session?.tabId !== "number") return;
+  await showRecordingControls(session.tabId, sessionId, state);
+}
+async function hideRecordingControlsForSession(sessionId) {
+  const session = await getSession(sessionId);
+  if (typeof session?.tabId !== "number") return;
+  await hideRecordingControls(session.tabId, sessionId);
+}
+async function restoreRecordingControlsForTab(tabId) {
+  const recordingSession = (await getSortedSessions()).find(
+    (item) => item.status === "recording" && item.tabId === tabId
+  );
+  if (!recordingSession) return;
+  await showRecordingControls(tabId, recordingSession.id, "recording");
+}
+function scheduleRecordingControlsRestore(tabId) {
+  const existing = recordingControlRestoreTimers.get(tabId);
+  if (typeof existing === "number") {
+    self.clearTimeout(existing);
+  }
+  const timeout = self.setTimeout(() => {
+    recordingControlRestoreTimers.delete(tabId);
+    void restoreRecordingControlsForTab(tabId);
+  }, 700);
+  recordingControlRestoreTimers.set(tabId, timeout);
+}
+async function showRecordingControls(tabId, sessionId, state) {
+  try {
+    await sendContentMessageWithInjection(tabId, {
+      type: "SHOW_RECORDING_CONTROLS",
+      sessionId,
+      state
+    });
+  } catch {
+  }
+}
+async function hideRecordingControls(tabId, sessionId) {
+  await sendContentMessage(tabId, {
+    type: "HIDE_RECORDING_CONTROLS",
+    sessionId
+  });
+}
+async function sendContentMessage(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+  }
+}
+async function sendContentMessageWithInjection(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!isMissingReceiverError(error)) throw error;
+    await injectContentScript(tabId);
+    await chrome.tabs.sendMessage(tabId, message);
+  }
+}
+async function requestRegionSelection(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "START_REGION_SELECTION"
+    });
+  } catch (error) {
+    if (!isMissingReceiverError(error)) throw error;
+    await injectContentScript(tabId);
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "START_REGION_SELECTION"
+    });
+  }
+}
+async function injectContentScript(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not start region selection on this page. ${message}`);
+  }
+}
+function isMissingReceiverError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Receiving end does not exist") || message.includes("Could not establish connection");
 }
 function isCaptureRegion(value) {
   return !!value && typeof value.x === "number" && typeof value.y === "number" && typeof value.width === "number" && typeof value.height === "number";

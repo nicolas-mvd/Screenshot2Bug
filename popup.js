@@ -594,7 +594,7 @@ function bindEvents() {
     void runCapture({ type: "START_VIDEO_CAPTURE", area: "region" });
   });
   document.querySelector("#stopRecordingButton")?.addEventListener("click", () => {
-    if (session) void request({ type: "STOP_VIDEO_CAPTURE", sessionId: session.id });
+    void stopRecording();
   });
   document.querySelector("#stepsInput")?.addEventListener("input", (event) => {
     steps = event.target.value;
@@ -756,6 +756,19 @@ async function generateReport() {
     render();
   }
 }
+async function stopRecording() {
+  if (!session) return;
+  statusMessage = "Saving recording...";
+  session = { ...session, status: "capturing" };
+  render();
+  try {
+    await request({ type: "STOP_VIDEO_CAPTURE", sessionId: session.id });
+    startPolling();
+  } catch (error) {
+    statusMessage = error instanceof Error ? error.message : String(error);
+    render();
+  }
+}
 async function copyReport() {
   await navigator.clipboard.writeText(report);
   await closeReportFocus("Markdown copied. Report closed.");
@@ -819,7 +832,10 @@ async function saveEdit() {
     }
   });
   report = buildTemplateReport({ session, steps, notes });
-  await closeReportFocus("Screenshot edits saved. Report closed.");
+  editState = void 0;
+  statusMessage = "Screenshot edits saved.";
+  await refreshSessions();
+  render();
 }
 async function closeReportFocus(message = "") {
   const sessionId = session?.id;

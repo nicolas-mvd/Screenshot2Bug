@@ -317,7 +317,7 @@ function bindEvents(): void {
     void runCapture({ type: "START_VIDEO_CAPTURE", area: "region" });
   });
   document.querySelector("#stopRecordingButton")?.addEventListener("click", () => {
-    if (session) void request({ type: "STOP_VIDEO_CAPTURE", sessionId: session.id });
+    void stopRecording();
   });
   document.querySelector<HTMLTextAreaElement>("#stepsInput")?.addEventListener("input", (event) => {
     steps = (event.target as HTMLTextAreaElement).value;
@@ -499,6 +499,20 @@ async function generateReport(): Promise<void> {
   }
 }
 
+async function stopRecording(): Promise<void> {
+  if (!session) return;
+  statusMessage = "Saving recording...";
+  session = { ...session, status: "capturing" };
+  render();
+  try {
+    await request({ type: "STOP_VIDEO_CAPTURE", sessionId: session.id });
+    startPolling();
+  } catch (error) {
+    statusMessage = error instanceof Error ? error.message : String(error);
+    render();
+  }
+}
+
 async function copyReport(): Promise<void> {
   await navigator.clipboard.writeText(report);
   await closeReportFocus("Markdown copied. Report closed.");
@@ -572,7 +586,10 @@ async function saveEdit(): Promise<void> {
     }
   });
   report = buildTemplateReport({ session, steps, notes });
-  await closeReportFocus("Screenshot edits saved. Report closed.");
+  editState = undefined;
+  statusMessage = "Screenshot edits saved.";
+  await refreshSessions();
+  render();
 }
 
 async function closeReportFocus(message = ""): Promise<void> {

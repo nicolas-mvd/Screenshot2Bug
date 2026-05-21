@@ -1,21 +1,136 @@
 // src/content/content-script.ts
-window.addEventListener("message", (event) => {
-  if (event.source !== window || event.data?.source !== "screenshot2bug") return;
+var contentScriptKey = "__screenshot2bug_content_script__";
+var contentWindow = window;
+var activeRecordingControl;
+var recordingControlsWatchHandle;
+if (!contentWindow[contentScriptKey]) {
+  contentWindow[contentScriptKey] = true;
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "screenshot2bug") return;
+    chrome.runtime.sendMessage({
+      type: "LOG_CONSOLE_ENTRY",
+      entry: event.data.entry
+    }).catch(() => {
+    });
+  });
+  chrome.runtime.onMessage.addListener(
+    (message, _sender, sendResponse) => {
+      if (message.type === "SHOW_RECORDING_CONTROLS") {
+        showRecordingControls(message.sessionId, message.state);
+        sendResponse({ error: "" });
+        return false;
+      }
+      if (message.type === "HIDE_RECORDING_CONTROLS") {
+        hideRecordingControls(message.sessionId);
+        sendResponse({ error: "" });
+        return false;
+      }
+      if (message.type !== "START_REGION_SELECTION") return false;
+      void selectRegion().then((region) => sendResponse(region)).catch(
+        (error) => sendResponse({ error: error instanceof Error ? error.message : String(error) })
+      );
+      return true;
+    }
+  );
   chrome.runtime.sendMessage({
-    type: "LOG_CONSOLE_ENTRY",
-    entry: event.data.entry
+    type: "CONTENT_SCRIPT_READY"
   }).catch(() => {
   });
-});
-chrome.runtime.onMessage.addListener(
-  (message, _sender, sendResponse) => {
-    if (message.type !== "START_REGION_SELECTION") return false;
-    void selectRegion().then((region) => sendResponse(region)).catch(
-      (error) => sendResponse({ error: error instanceof Error ? error.message : String(error) })
-    );
-    return true;
+}
+function showRecordingControls(sessionId, state) {
+  activeRecordingControl = { sessionId, state };
+  renderRecordingControls(sessionId, state);
+  startRecordingControlsWatch();
+}
+function renderRecordingControls(sessionId, state) {
+  const existing = document.querySelector("[data-screenshot2bug-recording-controls]");
+  if (existing?.dataset.sessionId === sessionId) {
+    updateRecordingControls(existing, state);
+    return;
   }
-);
+  existing?.remove();
+  const controls = document.createElement("div");
+  controls.dataset.screenshot2bugRecordingControls = "true";
+  controls.dataset.sessionId = sessionId;
+  controls.style.cssText = [
+    "position:fixed",
+    "right:18px",
+    "top:18px",
+    "z-index:2147483647",
+    "display:flex",
+    "align-items:center",
+    "gap:10px",
+    "border:1px solid rgba(255,255,255,.18)",
+    "border-radius:8px",
+    "background:#172026",
+    "color:#ffffff",
+    "box-shadow:0 10px 28px rgba(15,23,42,.28)",
+    "font:600 13px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+    "padding:9px 10px"
+  ].join(";");
+  const label = document.createElement("span");
+  label.dataset.role = "label";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.role = "stop";
+  button.style.cssText = [
+    "border:0",
+    "border-radius:7px",
+    "background:#b23a26",
+    "color:#ffffff",
+    "font:700 12px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+    "min-height:30px",
+    "padding:0 10px",
+    "cursor:pointer"
+  ].join(";");
+  button.addEventListener("click", () => {
+    updateRecordingControls(controls, "saving");
+    chrome.runtime.sendMessage({
+      type: "STOP_VIDEO_CAPTURE",
+      sessionId
+    }).catch((error) => {
+      updateRecordingControls(controls, "recording");
+      label.textContent = error instanceof Error ? error.message : String(error);
+    });
+  });
+  controls.append(label, button);
+  document.documentElement.append(controls);
+  updateRecordingControls(controls, state);
+}
+function startRecordingControlsWatch() {
+  if (typeof recordingControlsWatchHandle === "number") return;
+  recordingControlsWatchHandle = window.setInterval(() => {
+    if (!activeRecordingControl) return;
+    const controls = document.querySelector("[data-screenshot2bug-recording-controls]");
+    if (controls?.dataset.sessionId === activeRecordingControl.sessionId) {
+      updateRecordingControls(controls, activeRecordingControl.state);
+      return;
+    }
+    renderRecordingControls(activeRecordingControl.sessionId, activeRecordingControl.state);
+  }, 1e3);
+}
+function updateRecordingControls(container, state) {
+  const label = container.querySelector("[data-role='label']");
+  const button = container.querySelector("[data-role='stop']");
+  if (label) label.textContent = state === "saving" ? "Saving recording..." : "Recording tab";
+  if (button) {
+    button.textContent = state === "saving" ? "Saving..." : "Stop";
+    button.disabled = state === "saving";
+    button.style.opacity = state === "saving" ? "0.7" : "1";
+    button.style.cursor = state === "saving" ? "wait" : "pointer";
+  }
+}
+function hideRecordingControls(sessionId) {
+  if (activeRecordingControl?.sessionId === sessionId) {
+    activeRecordingControl = void 0;
+  }
+  if (!activeRecordingControl && typeof recordingControlsWatchHandle === "number") {
+    window.clearInterval(recordingControlsWatchHandle);
+    recordingControlsWatchHandle = void 0;
+  }
+  const controls = document.querySelector("[data-screenshot2bug-recording-controls]");
+  if (controls?.dataset.sessionId === sessionId) controls.remove();
+}
 function selectRegion() {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector("[data-screenshot2bug-region-overlay]");

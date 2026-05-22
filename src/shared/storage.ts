@@ -187,6 +187,9 @@ function mergeNetworkEntries(
       preferredBase.responseBodyPreview ?? supplemental.responseBodyPreview,
     responseBodyTruncated:
       preferredBase.responseBodyTruncated ?? supplemental.responseBodyTruncated,
+    responseBodyUnavailableReason:
+      preferredBase.responseBodyUnavailableReason ??
+      supplemental.responseBodyUnavailableReason,
     responseContentType:
       preferredBase.responseContentType ?? supplemental.responseContentType,
     error: preferredBase.error ?? supplemental.error

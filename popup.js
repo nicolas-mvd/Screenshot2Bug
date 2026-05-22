@@ -105,7 +105,11 @@ function formatNetworkRequests(session2) {
     const status = entry.error ? `error: ${entry.error}` : typeof entry.status === "number" ? `${entry.status}${entry.statusText ? ` ${entry.statusText}` : ""}` : "no status";
     const duration = typeof entry.durationMs === "number" ? ` in ${entry.durationMs}ms` : "";
     const request = entry.requestBodyPreview ? `\n  request: ${singleLine(entry.requestBodyPreview)}` : "";
-    const response = entry.responseBodyPreview ? `\n  response: ${singleLine(entry.responseBodyPreview)}` : "";
+    const response = entry.responseBodyPreview
+      ? `\n  response: ${singleLine(entry.responseBodyPreview)}`
+      : entry.responseBodyUnavailableReason
+        ? `\n  response: unavailable (${singleLine(entry.responseBodyUnavailableReason)})`
+        : "";
     return `- [${entry.timestamp}] ${entry.method} ${entry.url} -> ${status}${duration}${request}${response}`;
   }).join("\n");
 }
@@ -144,6 +148,7 @@ function preferNetworkEntry(first, second) {
     },
     requestBodyPreview: primary.requestBodyPreview ?? secondary.requestBodyPreview,
     responseBodyPreview: primary.responseBodyPreview ?? secondary.responseBodyPreview,
+    responseBodyUnavailableReason: primary.responseBodyUnavailableReason ?? secondary.responseBodyUnavailableReason,
     responseContentType: primary.responseContentType ?? secondary.responseContentType,
     error: primary.error ?? secondary.error
   };

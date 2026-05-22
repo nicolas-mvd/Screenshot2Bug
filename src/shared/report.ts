@@ -81,6 +81,8 @@ function formatNetworkRequests(session: CaptureSession): string {
         : "";
       const response = entry.responseBodyPreview
         ? `\n  response: ${singleLine(entry.responseBodyPreview)}`
+        : entry.responseBodyUnavailableReason
+          ? `\n  response: unavailable (${singleLine(entry.responseBodyUnavailableReason)})`
         : "";
       return `- [${entry.timestamp}] ${entry.method} ${entry.url} -> ${status}${duration}${request}${response}`;
     })
@@ -139,6 +141,8 @@ function preferNetworkEntry(
     },
     requestBodyPreview: primary.requestBodyPreview ?? secondary.requestBodyPreview,
     responseBodyPreview: primary.responseBodyPreview ?? secondary.responseBodyPreview,
+    responseBodyUnavailableReason:
+      primary.responseBodyUnavailableReason ?? secondary.responseBodyUnavailableReason,
     responseContentType: primary.responseContentType ?? secondary.responseContentType,
     error: primary.error ?? secondary.error
   };

@@ -44,6 +44,7 @@ export interface NetworkEntry {
   requestBodyTruncated?: boolean;
   responseBodyPreview?: string;
   responseBodyTruncated?: boolean;
+  responseBodyUnavailableReason?: string;
   responseContentType?: string;
   error?: string;
 }

@@ -107,7 +107,8 @@ chrome.webRequest.onCompleted.addListener(
       ok: details.statusCode >= 200 && details.statusCode < 400,
       fromCache: details.fromCache,
       requestHeaders: pending.requestHeaders,
-      responseHeaders: pending.responseHeaders
+      responseHeaders: pending.responseHeaders,
+      responseBodyUnavailableReason: webRequestResponseBodyUnavailableReason()
     });
 
     void appendNetworkEntry(details.tabId, entry);
@@ -133,6 +134,7 @@ chrome.webRequest.onErrorOccurred.addListener(
       ok: false,
       requestHeaders: pending.requestHeaders,
       responseHeaders: pending.responseHeaders,
+      responseBodyUnavailableReason: webRequestResponseBodyUnavailableReason(),
       error: details.error
     });
 
@@ -588,8 +590,15 @@ function sanitizeNetworkEntry(entry: NetworkEntry): NetworkEntry {
       : undefined,
     responseBodyPreview: entry.responseBodyPreview
       ? sanitizePreview(entry.responseBodyPreview, entry.responseContentType)
+      : undefined,
+    responseBodyUnavailableReason: entry.responseBodyUnavailableReason
+      ? sanitizePreview(entry.responseBodyUnavailableReason)
       : undefined
   };
+}
+
+function webRequestResponseBodyUnavailableReason(): string {
+  return "Chrome webRequest metadata does not expose response bodies; reload the page after the extension is active so fetch/XHR capture can read text responses.";
 }
 
 function sanitizeHeaderList(

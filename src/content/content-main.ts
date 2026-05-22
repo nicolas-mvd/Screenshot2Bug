@@ -118,6 +118,7 @@
           requestBodyTruncated: requestBody?.truncated,
           responseBodyPreview: responsePreview?.preview,
           responseBodyTruncated: responsePreview?.truncated,
+          responseBodyUnavailableReason: responsePreview?.unavailableReason,
           responseContentType: response.headers.get("content-type") || undefined
         });
 
@@ -136,6 +137,7 @@
           requestHeaders: request.headers,
           requestBodyPreview: requestBody?.preview,
           requestBodyTruncated: requestBody?.truncated,
+          responseBodyUnavailableReason: "request failed before a response was available",
           error: error instanceof Error ? error.message : String(error)
         });
         throw error;
@@ -210,6 +212,7 @@
           requestBodyTruncated: requestPreview?.truncated,
           responseBodyPreview: responsePreview?.preview,
           responseBodyTruncated: responsePreview?.truncated,
+          responseBodyUnavailableReason: responsePreview?.unavailableReason,
           responseContentType: contentType,
           error
         });
@@ -243,29 +246,47 @@
   }
 
   async function previewFetchResponse(response) {
-    if (!response || response.bodyUsed || response.type === "opaque") return undefined;
+    if (!response) return { unavailableReason: "no response object" };
+    if (response.bodyUsed) return { unavailableReason: "response body was already consumed" };
+    if (response.type === "opaque") return { unavailableReason: "opaque response" };
     const contentType = response.headers.get("content-type") || "";
     if (!isTextLike(contentType) || response.status === 204 || response.status === 304) {
-      return undefined;
+      return {
+        unavailableReason:
+          response.status === 204 || response.status === 304
+            ? `status ${response.status} has no response body`
+            : `non-text response (${contentType || "unknown content type"})`
+      };
     }
 
     try {
       const clone = response.clone();
-      if (clone.body?.getReader) return readStreamPreview(clone.body, contentType);
-      return truncateAndSanitize(await clone.text(), contentType);
+      const preview = clone.body?.getReader
+        ? await readStreamPreview(clone.body, contentType)
+        : truncateAndSanitize(await clone.text(), contentType);
+      return preview?.preview
+        ? preview
+        : { ...preview, unavailableReason: "empty response body" };
     } catch {
-      return undefined;
+      return { unavailableReason: "response body could not be read" };
     }
   }
 
   function previewXhrResponse(xhr, contentType = "") {
     if (!isTextLike(contentType) || (xhr.responseType && xhr.responseType !== "text")) {
-      return undefined;
+      return {
+        unavailableReason: xhr.responseType
+          ? `XHR responseType ${xhr.responseType} is not text`
+          : `non-text response (${contentType || "unknown content type"})`
+      };
     }
     try {
-      return truncateAndSanitize(xhr.responseText || "", contentType);
+      const preview = truncateAndSanitize(xhr.responseText || "", contentType);
+      return preview.preview
+        ? preview
+        : { ...preview, unavailableReason: "empty response body" };
     } catch {
-      return undefined;
+      return { unavailableReason: "XHR response body could not be read" };
     }
   }
 
@@ -368,6 +389,9 @@
         : undefined,
       responseBodyPreview: entry.responseBodyPreview
         ? sanitizePreview(entry.responseBodyPreview, entry.responseContentType)
+        : undefined,
+      responseBodyUnavailableReason: entry.responseBodyUnavailableReason
+        ? sanitizePreview(entry.responseBodyUnavailableReason)
         : undefined
     };
   }

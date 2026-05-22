@@ -39,6 +39,7 @@
     </p>
 
     <button id="manualErrorButton">Trigger console.error</button>
+    <button id="networkButton">Trigger network requests</button>
 
     <p>
       It also tries to load a missing image:
@@ -59,6 +60,34 @@
         console.error("Screenshot2Bug test: manual button error", {
           clickedAt: new Date().toISOString()
         });
+      });
+
+      document.querySelector("#networkButton").addEventListener("click", async () => {
+        await fetch("data:application/json,%7B%22ok%22%3Atrue%7D");
+
+        fetch("./missing-api-for-screenshot2bug.json?api_key=should-redact").catch(() => {});
+
+        await fetch("data:application/json,%7B%22created%22%3Atrue%7D", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer should-redact"
+          },
+          body: JSON.stringify({
+            email: "founder@example.com",
+            password: "should-redact",
+            token: "should-redact",
+            action: "create-test-bug"
+          })
+        });
+
+        const xhrSuccess = new XMLHttpRequest();
+        xhrSuccess.open("GET", "data:text/plain,Screenshot2Bug%20XHR%20success");
+        xhrSuccess.send();
+
+        const xhrFailure = new XMLHttpRequest();
+        xhrFailure.open("GET", "./missing-xhr-for-screenshot2bug.json?token=should-redact");
+        xhrFailure.send();
       });
     </script>
   </body>

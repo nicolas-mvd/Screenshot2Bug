@@ -1,24 +1,34 @@
 import type { RuntimeMessage } from "../shared/types";
+import type { CaptureRegion } from "../shared/types";
 
 let recorder: MediaRecorder | undefined;
 let stream: MediaStream | undefined;
+let sourceStream: MediaStream | undefined;
 let chunks: Blob[] = [];
 let currentSessionId: string | undefined;
+let currentRegion: CaptureRegion | undefined;
+let drawFrameHandle: number | undefined;
+let cropVideo: HTMLVideoElement | undefined;
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage) => {
   if (message.type === "OFFSCREEN_START_RECORDING") {
-    void startRecording(message.sessionId, message.streamId);
+    void startRecording(message.sessionId, message.streamId, message.region);
   }
   if (message.type === "OFFSCREEN_STOP_RECORDING") {
     stopRecording(message.sessionId);
   }
 });
 
-async function startRecording(sessionId: string, streamId: string): Promise<void> {
+async function startRecording(
+  sessionId: string,
+  streamId: string,
+  region?: CaptureRegion
+): Promise<void> {
   try {
     currentSessionId = sessionId;
+    currentRegion = region;
     chunks = [];
-    stream = await navigator.mediaDevices.getUserMedia({
+    sourceStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
         mandatory: {
@@ -27,6 +37,7 @@ async function startRecording(sessionId: string, streamId: string): Promise<void
         }
       } as unknown as MediaTrackConstraints
     });
+    stream = region ? await createCroppedStream(sourceStream, region) : sourceStream;
 
     const mimeType = pickMimeType();
     recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -39,7 +50,7 @@ async function startRecording(sessionId: string, streamId: string): Promise<void
       void notifyError(sessionId, recorderError.error?.message ?? "Recording failed.");
     };
     recorder.onstop = () => void completeRecording(sessionId);
-    recorder.start(1000);
+    recorder.start(250);
   } catch (error) {
     await notifyError(sessionId, error instanceof Error ? error.message : String(error));
   }
@@ -48,6 +59,7 @@ async function startRecording(sessionId: string, streamId: string): Promise<void
 function stopRecording(sessionId: string): void {
   if (sessionId !== currentSessionId) return;
   if (recorder && recorder.state !== "inactive") {
+    recorder.requestData();
     recorder.stop();
   } else {
     void notifyError(sessionId, "No active recording found.");
@@ -56,7 +68,7 @@ function stopRecording(sessionId: string): void {
 
 async function completeRecording(sessionId: string): Promise<void> {
   const mimeType = recorder?.mimeType || "video/webm";
-  stream?.getTracks().forEach((track) => track.stop());
+  cleanupStreams();
   const blob = new Blob(chunks, { type: mimeType });
   const dataUrl = await blobToDataUrl(blob);
 
@@ -64,22 +76,111 @@ async function completeRecording(sessionId: string): Promise<void> {
     type: "OFFSCREEN_RECORDING_COMPLETE",
     sessionId,
     dataUrl,
-    mimeType
+    mimeType,
+    region: currentRegion
   } satisfies RuntimeMessage);
 
   recorder = undefined;
   stream = undefined;
+  sourceStream = undefined;
   chunks = [];
   currentSessionId = undefined;
+  currentRegion = undefined;
 }
 
 async function notifyError(sessionId: string, error: string): Promise<void> {
-  stream?.getTracks().forEach((track) => track.stop());
+  cleanupStreams();
   await chrome.runtime.sendMessage({
     type: "OFFSCREEN_RECORDING_ERROR",
     sessionId,
     error
   } satisfies RuntimeMessage);
+  recorder = undefined;
+  stream = undefined;
+  sourceStream = undefined;
+  chunks = [];
+  currentSessionId = undefined;
+  currentRegion = undefined;
+}
+
+async function createCroppedStream(
+  input: MediaStream,
+  region: CaptureRegion
+): Promise<MediaStream> {
+  cropVideo = document.createElement("video");
+  cropVideo.srcObject = input;
+  cropVideo.muted = true;
+  cropVideo.playsInline = true;
+  await cropVideo.play();
+  if (!cropVideo.videoWidth || !cropVideo.videoHeight) {
+    await waitForVideoMetadata(cropVideo);
+  }
+
+  const scaleX = cropVideo.videoWidth / region.viewportWidth;
+  const scaleY = cropVideo.videoHeight / region.viewportHeight;
+  const sourceX = Math.round(region.x * scaleX);
+  const sourceY = Math.round(region.y * scaleY);
+  const sourceWidth = Math.max(1, Math.round(region.width * scaleX));
+  const sourceHeight = Math.max(1, Math.round(region.height * scaleY));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sourceWidth;
+  canvas.height = sourceHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare selected-area recording.");
+
+  const draw = () => {
+    if (!cropVideo) return;
+    context.drawImage(
+      cropVideo,
+      sourceX,
+      sourceY,
+      Math.min(sourceWidth, cropVideo.videoWidth - sourceX),
+      Math.min(sourceHeight, cropVideo.videoHeight - sourceY),
+      0,
+      0,
+      sourceWidth,
+      sourceHeight
+    );
+  };
+  await waitForFirstFrame(draw);
+  drawFrameHandle = window.setInterval(draw, 1000 / 30);
+
+  return canvas.captureStream(30);
+}
+
+function cleanupStreams(): void {
+  if (typeof drawFrameHandle === "number") {
+    window.clearInterval(drawFrameHandle);
+    drawFrameHandle = undefined;
+  }
+  cropVideo?.pause();
+  cropVideo = undefined;
+  stream?.getTracks().forEach((track) => track.stop());
+  if (sourceStream !== stream) {
+    sourceStream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
+function waitForFirstFrame(draw: () => void): Promise<void> {
+  draw();
+  return new Promise((resolve) => window.setTimeout(resolve, 50));
+}
+
+function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      reject(new Error("Could not read selected-area video dimensions."));
+    }, 2000);
+    video.addEventListener(
+      "loadedmetadata",
+      () => {
+        window.clearTimeout(timeout);
+        resolve();
+      },
+      { once: true }
+    );
+  });
 }
 
 function pickMimeType(): string {

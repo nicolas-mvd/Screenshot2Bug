@@ -1,4 +1,5 @@
 export type CaptureMode = "screenshot" | "video";
+export type CaptureArea = "full" | "region";
 
 export type CaptureStatus =
   | "draft"
@@ -23,12 +24,40 @@ export interface ConsoleEntry {
   stack?: string;
 }
 
+export interface NetworkEntry {
+  id: string;
+  source: "page" | "webRequest";
+  requestId?: string;
+  type?: string;
+  method: string;
+  url: string;
+  timestamp: string;
+  completedAt?: string;
+  durationMs?: number;
+  status?: number;
+  statusText?: string;
+  ok?: boolean;
+  fromCache?: boolean;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  requestBodyPreview?: string;
+  requestBodyTruncated?: boolean;
+  responseBodyPreview?: string;
+  responseBodyTruncated?: boolean;
+  responseContentType?: string;
+  error?: string;
+}
+
 export interface EvidenceAttachment {
   id: string;
   dataUrl: string;
   createdAt: string;
   url?: string;
   title?: string;
+  captureArea?: CaptureArea;
+  region?: CaptureRegion;
+  originalDataUrl?: string;
+  editedAt?: string;
 }
 
 export interface RecordingAttachment extends EvidenceAttachment {
@@ -54,6 +83,16 @@ export interface PageMetadata {
   };
 }
 
+export interface CaptureRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  devicePixelRatio: number;
+}
+
 export interface CaptureSession {
   id: string;
   mode: CaptureMode;
@@ -64,6 +103,7 @@ export interface CaptureSession {
   updatedAt: string;
   metadata?: PageMetadata;
   consoleErrors: ConsoleEntry[];
+  networkRequests: NetworkEntry[];
   screenshots?: EvidenceAttachment[];
   recordings?: RecordingAttachment[];
   screenshotDataUrl?: string;
@@ -76,6 +116,16 @@ export interface CaptureSession {
 export interface Settings {
   openaiApiKey?: string;
   openaiModel?: string;
+  githubClientId?: string;
+  githubAccessToken?: string;
+  githubUserLogin?: string;
+  githubSelectedRepo?: {
+    owner: string;
+    name: string;
+    fullName: string;
+    private?: boolean;
+  };
+  githubDefaultLabels?: string[];
 }
 
 export interface BackgroundResponse<T = unknown> {
@@ -85,23 +135,35 @@ export interface BackgroundResponse<T = unknown> {
 }
 
 export type RuntimeMessage =
-  | { type: "CAPTURE_SCREENSHOT" }
-  | { type: "START_VIDEO_CAPTURE" }
-  | { type: "ADD_SCREENSHOT_TO_SESSION"; sessionId: string }
-  | { type: "ADD_VIDEO_TO_SESSION"; sessionId: string }
+  | { type: "CAPTURE_SCREENSHOT"; area?: CaptureArea }
+  | { type: "START_VIDEO_CAPTURE"; area?: CaptureArea }
+  | { type: "ADD_SCREENSHOT_TO_SESSION"; sessionId: string; area?: CaptureArea }
+  | { type: "ADD_VIDEO_TO_SESSION"; sessionId: string; area?: CaptureArea }
   | { type: "STOP_VIDEO_CAPTURE"; sessionId: string }
   | { type: "GET_SESSION"; sessionId?: string }
   | { type: "GET_SESSIONS" }
   | { type: "SET_ACTIVE_SESSION"; sessionId: string }
+  | { type: "CLEAR_ACTIVE_SESSION"; sessionId?: string }
   | { type: "UPDATE_SESSION"; sessionId: string; patch: Partial<CaptureSession> }
+  | { type: "CONTENT_SCRIPT_READY" }
   | { type: "LOG_CONSOLE_ENTRY"; entry: ConsoleEntry }
-  | { type: "OFFSCREEN_START_RECORDING"; streamId: string; sessionId: string }
+  | { type: "LOG_NETWORK_ENTRY"; entry: NetworkEntry }
+  | { type: "START_REGION_SELECTION" }
+  | { type: "SHOW_RECORDING_CONTROLS"; sessionId: string; state: "recording" | "saving" }
+  | { type: "HIDE_RECORDING_CONTROLS"; sessionId: string }
+  | {
+      type: "OFFSCREEN_START_RECORDING";
+      streamId: string;
+      sessionId: string;
+      region?: CaptureRegion;
+    }
   | { type: "OFFSCREEN_STOP_RECORDING"; sessionId: string }
   | {
       type: "OFFSCREEN_RECORDING_COMPLETE";
       sessionId: string;
       dataUrl: string;
       mimeType: string;
+      region?: CaptureRegion;
     }
   | { type: "OFFSCREEN_RECORDING_ERROR"; sessionId: string; error: string };
 
@@ -109,7 +171,8 @@ export const STORAGE_KEYS = {
   latestSessionId: "latestSessionId",
   settings: "settings",
   sessions: "sessions",
-  consolePrefix: "console:"
+  consolePrefix: "console:",
+  networkPrefix: "network:"
 } as const;
 
 export const DEFAULT_MODEL = "gpt-5";

@@ -17,15 +17,16 @@ export function buildTemplateReport({ session, steps, notes }: ReportInput): str
         .map((entry) => `- [${entry.timestamp}] ${entry.source}: ${entry.message}`)
         .join("\n")
     : "- No console errors captured.";
+  const networkLines = formatNetworkRequests(normalized);
 
   const screenshots = normalized.screenshots ?? [];
   const recordings = normalized.recordings ?? [];
   const attachments = [
     screenshots.length
-      ? `- Screenshots: ${screenshots.length} PNG file${screenshots.length === 1 ? "" : "s"}`
+      ? `- Screenshots: ${screenshots.length} PNG file${screenshots.length === 1 ? "" : "s"}${formatEvidenceDetails(screenshots)}`
       : "",
     recordings.length
-      ? `- Recordings: ${recordings.length} WebM file${recordings.length === 1 ? "" : "s"}`
+      ? `- Recordings: ${recordings.length} WebM file${recordings.length === 1 ? "" : "s"}${formatEvidenceDetails(recordings)}`
       : ""
   ]
     .filter(Boolean)
@@ -53,9 +54,124 @@ ${notes.trim() || "No notes provided."}
 ## Console Errors
 ${errorLines}
 
+## Network Requests
+${networkLines}
+
 ## Attachments
 ${attachments || "- No binary attachments."}
 `;
+}
+
+function formatNetworkRequests(session: CaptureSession): string {
+  if (!session.networkRequests.length) return "- No network requests captured.";
+
+  return coalesceNetworkRequests(session.networkRequests)
+    .sort((first, second) => Number(isNetworkFailure(second)) - Number(isNetworkFailure(first)))
+    .slice(0, 20)
+    .map((entry) => {
+      const status = entry.error
+        ? `error: ${entry.error}`
+        : typeof entry.status === "number"
+          ? `${entry.status}${entry.statusText ? ` ${entry.statusText}` : ""}`
+          : "no status";
+      const duration =
+        typeof entry.durationMs === "number" ? ` in ${entry.durationMs}ms` : "";
+      const request = entry.requestBodyPreview
+        ? `\n  request: ${singleLine(entry.requestBodyPreview)}`
+        : "";
+      const response = entry.responseBodyPreview
+        ? `\n  response: ${singleLine(entry.responseBodyPreview)}`
+        : "";
+      return `- [${entry.timestamp}] ${entry.method} ${entry.url} -> ${status}${duration}${request}${response}`;
+    })
+    .join("\n");
+}
+
+function coalesceNetworkRequests(
+  entries: CaptureSession["networkRequests"]
+): CaptureSession["networkRequests"] {
+  const merged: CaptureSession["networkRequests"] = [];
+  for (const entry of entries) {
+    const index = merged.findIndex((candidate) => isDuplicateNetworkEntry(candidate, entry));
+    if (index === -1) {
+      merged.push(entry);
+      continue;
+    }
+
+    merged[index] = preferNetworkEntry(merged[index], entry);
+  }
+  return merged;
+}
+
+function isDuplicateNetworkEntry(
+  first: CaptureSession["networkRequests"][number],
+  second: CaptureSession["networkRequests"][number]
+): boolean {
+  if (first.requestId && first.requestId === second.requestId) return true;
+  if (first.method !== second.method || first.url !== second.url) return false;
+  const firstTime = new Date(first.timestamp).getTime();
+  const secondTime = new Date(second.timestamp).getTime();
+  return (
+    !Number.isNaN(firstTime) &&
+    !Number.isNaN(secondTime) &&
+    Math.abs(firstTime - secondTime) < 5000
+  );
+}
+
+function preferNetworkEntry(
+  first: CaptureSession["networkRequests"][number],
+  second: CaptureSession["networkRequests"][number]
+): CaptureSession["networkRequests"][number] {
+  const firstScore = networkEntryScore(first);
+  const secondScore = networkEntryScore(second);
+  const primary = secondScore > firstScore ? second : first;
+  const secondary = primary === first ? second : first;
+  return {
+    ...secondary,
+    ...primary,
+    requestHeaders: {
+      ...(secondary.requestHeaders ?? {}),
+      ...(primary.requestHeaders ?? {})
+    },
+    responseHeaders: {
+      ...(secondary.responseHeaders ?? {}),
+      ...(primary.responseHeaders ?? {})
+    },
+    requestBodyPreview: primary.requestBodyPreview ?? secondary.requestBodyPreview,
+    responseBodyPreview: primary.responseBodyPreview ?? secondary.responseBodyPreview,
+    responseContentType: primary.responseContentType ?? secondary.responseContentType,
+    error: primary.error ?? secondary.error
+  };
+}
+
+function networkEntryScore(entry: CaptureSession["networkRequests"][number]): number {
+  return (
+    (entry.responseBodyPreview ? 8 : 0) +
+    (entry.requestBodyPreview ? 4 : 0) +
+    (entry.source === "page" ? 2 : 0) +
+    (entry.responseHeaders ? 1 : 0)
+  );
+}
+
+function isNetworkFailure(entry: CaptureSession["networkRequests"][number]): boolean {
+  return Boolean(entry.error || entry.ok === false || (entry.status && entry.status >= 400));
+}
+
+function singleLine(value: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 500 ? `${compact.slice(0, 500)}...` : compact;
+}
+
+function formatEvidenceDetails(
+  items: Array<{ captureArea?: string; editedAt?: string }>
+): string {
+  const selected = items.filter((item) => item.captureArea === "region").length;
+  const edited = items.filter((item) => item.editedAt).length;
+  const details = [
+    selected ? `${selected} selected area` : "",
+    edited ? `${edited} edited` : ""
+  ].filter(Boolean);
+  return details.length ? ` (${details.join(", ")})` : "";
 }
 
 export async function generateAiReport(

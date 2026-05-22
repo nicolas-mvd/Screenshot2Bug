@@ -29,7 +29,7 @@ Load `dist/` as an unpacked extension from `chrome://extensions`.
 Screenshot2Bug requests Chrome extension permissions for:
 
 - Capturing the active tab screenshot or recording
-- Reading page metadata and console events from the active page
+- Reading page metadata, console events, and request evidence from the active page
 - Saving reports and drafts in local extension storage
 - Downloading ZIP exports
 - Calling the OpenAI API when the user supplies an API key
@@ -38,10 +38,12 @@ No OpenAI API key is bundled with the extension. Users add their own key from th
 
 ## Capture Modes
 
-- New screenshot report: popup button or `Option+Shift+S`
-- Attach screenshot to current report: popup button or `Control+Shift+S`
-- New video report: popup button or `Option+Shift+V`
-- Attach video to current report: popup button or `Control+Shift+V`
+- Full-tab screenshot: popup button or `Option+Shift+S`
+- Selected-area screenshot: popup button or `Option+Shift+A`
+- Full-tab video: popup button or `Option+Shift+V`
+- Selected-area video: popup button or `Option+Shift+R`
+
+Existing reports can be reopened from the popup and extended with full-tab or selected-area screenshots/videos. Screenshot evidence can be edited with crop, box, arrow, blur, and text tools before exporting. Saving or exporting a report closes its focus so the next capture starts a fresh report.
 
 Chrome users can remap these shortcuts at `chrome://extensions/shortcuts`.
 
@@ -50,6 +52,18 @@ Reports stay in local extension storage until removed by a future cleanup featur
 ## AI Reports
 
 Open the extension settings page and save an OpenAI API key. If no key is saved, Screenshot2Bug still creates a structured Markdown template report from the captured context.
+
+## GitHub Issues
+
+Screenshot2Bug can create a GitHub issue from the current bug report.
+
+1. Create a GitHub OAuth App and enable Device Flow.
+2. Copy the OAuth App's public Client ID.
+3. Open Screenshot2Bug settings and paste the Client ID.
+4. Click **Connect GitHub**, authorize the device code, and select a repository.
+5. Capture or open a report, then click **Create GitHub issue**.
+
+The GitHub token is stored locally in Chrome extension storage. Screenshots and recordings are not uploaded to GitHub in this version; they remain available through the local ZIP export.
 
 ## Test Page
 

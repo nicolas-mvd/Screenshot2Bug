@@ -188,7 +188,7 @@ async function generateAiReport(apiKey, model, input) {
           content: [
             {
               type: "input_text",
-              text: `Turn this captured browser bug context into a concise, founder/product-team friendly Markdown bug report. Keep the same facts, infer severity only if justified, and include actionable reproduction details.
+              text: `Turn this captured browser bug context into a concise, founder/product-team friendly Markdown bug report. Start with one specific H1 title in the format "# Bug: <failing user action or symptom>" and avoid generic page titles. Keep the same facts, infer severity only if justified, and include actionable reproduction details.
 
 ${fallback}`
             }
@@ -346,8 +346,16 @@ function buildGitHubIssue({
   report: report2,
   labels = ["bug"]
 }) {
-  const title = buildIssueTitle(session2);
+  const title = buildIssueTitle(session2, report2);
   const body = `${report2.trim()}
+
+---
+
+## RAW Console
+${formatRawConsole(session2.consoleErrors ?? [])}
+
+## RAW Network
+${formatRawNetwork(session2.networkRequests ?? [])}
 
 ---
 
@@ -360,12 +368,37 @@ Note: screenshots and recordings are kept in the local ZIP export for this repor
     labels: labels.filter(Boolean)
   };
 }
-function buildIssueTitle(session2) {
+function buildIssueTitle(session2, report2) {
+  const reportTitle = extractReportTitle(report2);
+  if (reportTitle) return normalizeIssueTitle(reportTitle);
   const pageTitle = session2.metadata?.title?.trim();
   const url = session2.metadata?.url?.trim();
-  if (pageTitle) return `Bug: ${pageTitle}`.slice(0, 256);
-  if (url) return `Bug: ${url}`.slice(0, 256);
+  if (pageTitle) return normalizeIssueTitle(pageTitle);
+  if (url) return normalizeIssueTitle(url);
   return `Bug report ${session2.id.slice(0, 8)}`;
+}
+function extractReportTitle(report2) {
+  const lines = report2.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bugLine = lines.slice(0, 20).find((line) => /^#{0,6}\s*bug\s*:/i.test(line) && !/^#{0,6}\s*bug report\s*:/i.test(line));
+  const heading = lines.find((line) => /^#{1,2}\s+\S/.test(line));
+  const candidate = bugLine?.replace(/^#{1,6}\s+/, "") ?? heading?.replace(/^#{1,6}\s+/, "");
+  return candidate?.replace(/^bug report\s*:\s*/i, "").trim();
+}
+function normalizeIssueTitle(title) {
+  const normalized = title.replace(/\s+/g, " ").trim();
+  const withPrefix = /^bug\s*:/i.test(normalized) ? normalized : `Bug: ${normalized}`;
+  return withPrefix.slice(0, 256);
+}
+function formatRawConsole(entries) {
+  if (!entries.length) return "_No raw console entries captured._";
+  return fencedJson(entries);
+}
+function formatRawNetwork(entries) {
+  if (!entries.length) return "_No raw network entries captured._";
+  return fencedJson(entries);
+}
+function fencedJson(value) {
+  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
 async function githubFetch(token, path, init2 = {}) {
   const response = await fetch(`${GITHUB_API_URL}${path}`, {

@@ -503,7 +503,7 @@ export async function generateAiReport(apiKey, model, input) {
           content: [
             {
               type: "input_text",
-              text: `Turn this captured browser bug context into a concise, founder/product-team friendly Markdown bug report. Keep the same facts, infer severity only if justified, and include actionable reproduction details.\n\n${fallback}`
+              text: `Turn this captured browser bug context into a concise, founder/product-team friendly Markdown bug report. Start with one specific H1 title in the format "# Bug: <failing user action or symptom>" and avoid generic page titles. Keep the same facts, infer severity only if justified, and include actionable reproduction details.\n\n${fallback}`
             }
           ]
         }

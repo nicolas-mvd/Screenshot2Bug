@@ -97,8 +97,16 @@ export async function createGitHubIssue(token, repo, issue) {
 }
 
 export function buildGitHubIssue({ session, report, labels = ["bug"] }) {
-  const title = buildIssueTitle(session);
+  const title = buildIssueTitle(session, report);
   const body = `${report.trim()}
+
+---
+
+## RAW Console
+${formatRawConsole(session.consoleErrors ?? [])}
+
+## RAW Network
+${formatRawNetwork(session.networkRequests ?? [])}
 
 ---
 
@@ -112,12 +120,47 @@ Note: screenshots and recordings are kept in the local ZIP export for this repor
   };
 }
 
-function buildIssueTitle(session) {
+function buildIssueTitle(session, report) {
+  const reportTitle = extractReportTitle(report);
+  if (reportTitle) return normalizeIssueTitle(reportTitle);
   const pageTitle = session.metadata?.title?.trim();
   const url = session.metadata?.url?.trim();
-  if (pageTitle) return `Bug: ${pageTitle}`.slice(0, 256);
-  if (url) return `Bug: ${url}`.slice(0, 256);
+  if (pageTitle) return normalizeIssueTitle(pageTitle);
+  if (url) return normalizeIssueTitle(url);
   return `Bug report ${session.id.slice(0, 8)}`;
+}
+
+function extractReportTitle(report) {
+  const lines = report
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const bugLine = lines
+    .slice(0, 20)
+    .find((line) => /^#{0,6}\s*bug\s*:/i.test(line) && !/^#{0,6}\s*bug report\s*:/i.test(line));
+  const heading = lines.find((line) => /^#{1,2}\s+\S/.test(line));
+  const candidate = bugLine?.replace(/^#{1,6}\s+/, "") ?? heading?.replace(/^#{1,6}\s+/, "");
+  return candidate?.replace(/^bug report\s*:\s*/i, "").trim();
+}
+
+function normalizeIssueTitle(title) {
+  const normalized = title.replace(/\s+/g, " ").trim();
+  const withPrefix = /^bug\s*:/i.test(normalized) ? normalized : `Bug: ${normalized}`;
+  return withPrefix.slice(0, 256);
+}
+
+function formatRawConsole(entries) {
+  if (!entries.length) return "_No raw console entries captured._";
+  return fencedJson(entries);
+}
+
+function formatRawNetwork(entries) {
+  if (!entries.length) return "_No raw network entries captured._";
+  return fencedJson(entries);
+}
+
+function fencedJson(value) {
+  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
 
 async function githubFetch(token, path, init = {}) {

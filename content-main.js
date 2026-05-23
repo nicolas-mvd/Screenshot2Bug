@@ -1,1 +1,455 @@
-(()=>{const q="__screenshot2bug_console_bridge__";if(Reflect.get(window,q))return;Reflect.set(window,q,!0);const u=32*1024,f="[redacted]",B=e=>{try{return e instanceof Error?e.stack||e.message:typeof e=="string"?e:JSON.stringify(e)}catch{return String(e)}},h=(e,t,r={})=>{window.postMessage({source:"screenshot2bug",entry:{level:"error",source:e,message:t,timestamp:new Date().toISOString(),url:window.location.href,...r}},"*")},v=e=>{window.postMessage({source:"screenshot2bug",networkEntry:_(e)},"*")},P=console.error;console.error=(...e)=>{h("console",e.map(B).join(" ")),P.apply(console,e)},window.addEventListener("error",e=>{const t=e.target;if(t&&t!==window){const r=t.currentSrc||t.src||t.href||t.data||"",n=t.tagName?t.tagName.toLowerCase():"resource";h("resource",`Failed to load ${n}${r?`: ${r}`:""}`);return}h("error",e.message||"Window error",{line:e.lineno,column:e.colno,stack:e.error?.stack})},!0),window.addEventListener("unhandledrejection",e=>{h("unhandledrejection",B(e.reason))}),window.addEventListener("securitypolicyviolation",e=>{h("securitypolicyviolation",`${e.violatedDirective}: blocked ${e.blockedURI||"inline code"}`)}),O(),x();function O(){if(typeof window.fetch!="function")return;const e=window.fetch;window.fetch=async function(r,n){const a=performance.now(),p=new Date().toISOString(),i=$(r,n),s=await H(n?.body);try{const o=await e.apply(this,arguments),w=await D(o),c=new Date().toISOString();return v({id:crypto.randomUUID(),source:"page",type:"fetch",method:i.method,url:i.url,timestamp:p,completedAt:c,durationMs:Math.round(performance.now()-a),status:o.status,statusText:o.statusText,ok:o.ok,fromCache:!1,requestHeaders:i.headers,responseHeaders:R(o.headers),requestBodyPreview:s?.preview,requestBodyTruncated:s?.truncated,responseBodyPreview:w?.preview,responseBodyTruncated:w?.truncated,responseBodyUnavailableReason:w?.unavailableReason,responseContentType:o.headers.get("content-type")||void 0}),o}catch(o){throw v({id:crypto.randomUUID(),source:"page",type:"fetch",method:i.method,url:i.url,timestamp:p,completedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-a),ok:!1,requestHeaders:i.headers,requestBodyPreview:s?.preview,requestBodyTruncated:s?.truncated,responseBodyUnavailableReason:"request failed before a response was available",error:o instanceof Error?o.message:String(o)}),o}}}function x(){const e=window.XMLHttpRequest;if(!e?.prototype)return;const t=e.prototype.open,r=e.prototype.send,n=e.prototype.setRequestHeader,a=new WeakMap;e.prototype.open=function(i,s){return a.set(this,{method:String(i||"GET").toUpperCase(),url:String(s||window.location.href),requestHeaders:{}}),t.apply(this,arguments)},e.prototype.setRequestHeader=function(i,s){const o=a.get(this);return o&&(o.requestHeaders[i]=String(s)),n.apply(this,arguments)},e.prototype.send=function(i){const s=this,o=a.get(s)??{method:"GET",url:window.location.href,requestHeaders:{}};a.set(s,o);const w=performance.now(),c=new Date().toISOString(),y=H(i);let U=!1;const g=async(G,V)=>{if(U)return;U=!0;const L=await y,A=X(W(()=>s.getAllResponseHeaders())||""),E=A["content-type"],k=M(s,E);v({id:crypto.randomUUID(),source:"page",type:"xmlhttprequest",method:o.method,url:o.url,timestamp:c,completedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-w),status:s.status||void 0,statusText:s.statusText||G,ok:s.status>=200&&s.status<400,requestHeaders:o.requestHeaders,responseHeaders:A,requestBodyPreview:L?.preview,requestBodyTruncated:L?.truncated,responseBodyPreview:k?.preview,responseBodyTruncated:k?.truncated,responseBodyUnavailableReason:k?.unavailableReason,responseContentType:E,error:V})};return s.addEventListener("loadend",()=>{g("complete")}),s.addEventListener("error",()=>{g("error","XMLHttpRequest failed")}),s.addEventListener("abort",()=>{g("abort","XMLHttpRequest aborted")}),s.addEventListener("timeout",()=>{g("timeout","XMLHttpRequest timed out")}),r.apply(s,arguments)}}function $(e,t={}){const r=String(t?.method||e?.method||"GET").toUpperCase(),n=String(e?.url||e||window.location.href),a={...e?.headers?R(e.headers):{},...t?.headers?R(t.headers):{}};return{method:r,url:n,headers:a}}async function D(e){if(!e)return{unavailableReason:"no response object"};if(e.bodyUsed)return{unavailableReason:"response body was already consumed"};if(e.type==="opaque")return{unavailableReason:"opaque response"};const t=e.headers.get("content-type")||"";if(!S(t)||e.status===204||e.status===304)return{unavailableReason:e.status===204||e.status===304?`status ${e.status} has no response body`:`non-text response (${t||"unknown content type"})`};try{const r=e.clone(),n=r.body?.getReader?await j(r.body,t):l(await r.text(),t);return n?.preview?n:{...n,unavailableReason:"empty response body"}}catch{return{unavailableReason:"response body could not be read"}}}function M(e,t=""){if(!S(t)||e.responseType&&e.responseType!=="text")return{unavailableReason:e.responseType?`XHR responseType ${e.responseType} is not text`:`non-text response (${t||"unknown content type"})`};try{const r=l(e.responseText||"",t);return r.preview?r:{...r,unavailableReason:"empty response body"}}catch{return{unavailableReason:"XHR response body could not be read"}}}async function H(e){if(e!=null)try{if(typeof e=="string")return l(e);if(e instanceof URLSearchParams)return l(e.toString());if(e instanceof FormData)return l(J(e));if(e instanceof Blob)return S(e.type)?l(await e.slice(0,u+1).text(),e.type):{preview:`[${e.constructor.name}: ${e.type||"application/octet-stream"}, ${e.size} bytes]`,truncated:!1};if(e instanceof ArrayBuffer||ArrayBuffer.isView(e)){const t=e instanceof ArrayBuffer?new Uint8Array(e):new Uint8Array(e.buffer,e.byteOffset,e.byteLength);return C(t)}return typeof ReadableStream<"u"&&e instanceof ReadableStream?{preview:"[ReadableStream body not inspected]",truncated:!1}:l(String(e))}catch{return}}async function j(e,t=""){const r=e.getReader(),n=[];let a=0,p=!1;try{for(;a<=u;){const{value:c,done:y}=await r.read();if(y)break;if(c&&(n.push(c),a+=c.byteLength??c.length??0,a>u)){p=!0,await r.cancel();break}}}catch{return}const i=new Uint8Array(Math.min(a,u));let s=0;for(const c of n){const y=c instanceof Uint8Array?c:new Uint8Array(c);if(i.set(y.slice(0,i.length-s),s),s+=y.byteLength,s>=i.length)break}const o=new TextDecoder().decode(i);return{preview:d(o,t),truncated:p}}function C(e){const t=e.byteLength>u,r=e.slice(0,u);return{preview:d(new TextDecoder().decode(r)),truncated:t}}function l(e,t=""){const r=e.length>u;return{preview:d(e.slice(0,u),t),truncated:r}}function _(e){return{...e,url:z(e.url),requestHeaders:T(e.requestHeaders),responseHeaders:T(e.responseHeaders),requestBodyPreview:e.requestBodyPreview?d(e.requestBodyPreview,e.requestHeaders?.["content-type"]):void 0,responseBodyPreview:e.responseBodyPreview?d(e.responseBodyPreview,e.responseContentType):void 0,responseBodyUnavailableReason:e.responseBodyUnavailableReason?d(e.responseBodyUnavailableReason):void 0}}function T(e={}){return Object.fromEntries(Object.entries(e).map(([t,r])=>[t.toLowerCase(),m(t)?f:d(String(r))]))}function z(e){try{const t=new URL(e,window.location.href);for(const r of[...t.searchParams.keys()])m(r)&&t.searchParams.set(r,f);return t.href}catch{return d(String(e))}}function d(e,t=""){let r=String(e);if(I(t)||F(r))try{return JSON.stringify(b(JSON.parse(r)),null,2)}catch{}if(t.includes("x-www-form-urlencoded")||N(r))try{const n=new URLSearchParams(r);for(const a of[...n.keys()])m(a)&&n.set(a,f);r=n.toString()}catch{}return r.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi,`$1 ${f}`).replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|secret|client[_-]?secret)=([^&\s]+)/gi,`$1=${f}`)}function b(e){return Array.isArray(e)?e.map(b):!e||typeof e!="object"?e:Object.fromEntries(Object.entries(e).map(([t,r])=>[t,m(t)?f:b(r)]))}function m(e=""){return/authorization|cookie|token|password|passwd|secret|api[-_]?key|session|credential|csrf|xsrf/i.test(e)}function S(e=""){return!e||/text|json|xml|javascript|typescript|html|css|svg|form-urlencoded/i.test(e)}function I(e=""){return/json/i.test(e)}function F(e){const t=e.trim();return t.startsWith("{")&&t.endsWith("}")||t.startsWith("[")&&t.endsWith("]")}function N(e){return/^[^=\s&]+=[\s\S]*(&[^=\s&]+=[\s\S]*)*$/.test(e.trim())}function R(e){const t={};try{if(e instanceof Headers)return e.forEach((r,n)=>{t[n]=r}),t;if(Array.isArray(e)){for(const[r,n]of e)t[String(r)]=String(n);return t}for(const[r,n]of Object.entries(e??{}))t[r]=Array.isArray(n)?n.join(", "):String(n)}catch{return t}return t}function X(e){const t={};for(const r of e.split(/\r?\n/)){const n=r.indexOf(":");n!==-1&&(t[r.slice(0,n).trim().toLowerCase()]=r.slice(n+1).trim())}return t}function J(e){const t={};for(const[r,n]of e.entries())t[r]=n instanceof File?`[File: ${n.name}, ${n.type||"application/octet-stream"}, ${n.size} bytes]`:n;return JSON.stringify(t)}function W(e){try{return e()}catch{return}}})();
+"use strict";
+(() => {
+  // src/content/content-main.ts
+  (() => {
+    const bridgeKey = "__screenshot2bug_console_bridge__";
+    if (Reflect.get(window, bridgeKey)) return;
+    Reflect.set(window, bridgeKey, true);
+    const PREVIEW_LIMIT = 32 * 1024;
+    const REDACTED = "[redacted]";
+    const serialize = (value) => {
+      try {
+        if (value instanceof Error) return value.stack || value.message;
+        if (typeof value === "string") return value;
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    };
+    const publishConsole = (source, message, extras = {}) => {
+      window.postMessage(
+        {
+          source: "screenshot2bug",
+          entry: {
+            level: "error",
+            source,
+            message,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            url: window.location.href,
+            ...extras
+          }
+        },
+        "*"
+      );
+    };
+    const publishNetwork = (entry) => {
+      window.postMessage(
+        {
+          source: "screenshot2bug",
+          networkEntry: sanitizeNetworkEntry(entry)
+        },
+        "*"
+      );
+    };
+    const originalError = console.error;
+    console.error = (...args) => {
+      publishConsole("console", args.map(serialize).join(" "));
+      originalError.apply(console, args);
+    };
+    window.addEventListener(
+      "error",
+      (event) => {
+        const target = event.target;
+        if (target && target !== window) {
+          const url = target.currentSrc || target.src || target.href || target.data || "";
+          const tag = target.tagName ? target.tagName.toLowerCase() : "resource";
+          publishConsole("resource", `Failed to load ${tag}${url ? `: ${url}` : ""}`);
+          return;
+        }
+        publishConsole("error", event.message || "Window error", {
+          line: event.lineno,
+          column: event.colno,
+          stack: event.error?.stack
+        });
+      },
+      true
+    );
+    window.addEventListener("unhandledrejection", (event) => {
+      publishConsole("unhandledrejection", serialize(event.reason));
+    });
+    window.addEventListener("securitypolicyviolation", (event) => {
+      publishConsole(
+        "securitypolicyviolation",
+        `${event.violatedDirective}: blocked ${event.blockedURI || "inline code"}`
+      );
+    });
+    installFetchCapture();
+    installXhrCapture();
+    function installFetchCapture() {
+      if (typeof window.fetch !== "function") return;
+      const originalFetch = window.fetch;
+      window.fetch = async function screenshot2bugFetch(input, init) {
+        const startedAt = performance.now();
+        const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+        const request = describeFetchRequest(input, init);
+        const requestBody = await previewBody(init?.body);
+        try {
+          const response = await originalFetch.apply(this, arguments);
+          const responsePreview = await previewFetchResponse(response);
+          const completedAt = (/* @__PURE__ */ new Date()).toISOString();
+          publishNetwork({
+            id: crypto.randomUUID(),
+            source: "page",
+            type: "fetch",
+            method: request.method,
+            url: request.url,
+            timestamp,
+            completedAt,
+            durationMs: Math.round(performance.now() - startedAt),
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            fromCache: false,
+            requestHeaders: request.headers,
+            responseHeaders: headersToRecord(response.headers),
+            requestBodyPreview: requestBody?.preview,
+            requestBodyTruncated: requestBody?.truncated,
+            responseBodyPreview: responsePreview?.preview,
+            responseBodyTruncated: responsePreview?.truncated,
+            responseBodyUnavailableReason: responsePreview?.unavailableReason,
+            responseContentType: response.headers.get("content-type") || void 0
+          });
+          return response;
+        } catch (error) {
+          publishNetwork({
+            id: crypto.randomUUID(),
+            source: "page",
+            type: "fetch",
+            method: request.method,
+            url: request.url,
+            timestamp,
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            durationMs: Math.round(performance.now() - startedAt),
+            ok: false,
+            requestHeaders: request.headers,
+            requestBodyPreview: requestBody?.preview,
+            requestBodyTruncated: requestBody?.truncated,
+            responseBodyUnavailableReason: "request failed before a response was available",
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
+      };
+    }
+    function installXhrCapture() {
+      const OriginalXHR = window.XMLHttpRequest;
+      if (!OriginalXHR?.prototype) return;
+      const originalOpen = OriginalXHR.prototype.open;
+      const originalSend = OriginalXHR.prototype.send;
+      const originalSetRequestHeader = OriginalXHR.prototype.setRequestHeader;
+      const requests = /* @__PURE__ */ new WeakMap();
+      OriginalXHR.prototype.open = function screenshot2bugOpen(method, url) {
+        requests.set(this, {
+          method: String(method || "GET").toUpperCase(),
+          url: String(url || window.location.href),
+          requestHeaders: {}
+        });
+        return originalOpen.apply(this, arguments);
+      };
+      OriginalXHR.prototype.setRequestHeader = function screenshot2bugSetHeader(name, value) {
+        const meta = requests.get(this);
+        if (meta) meta.requestHeaders[name] = String(value);
+        return originalSetRequestHeader.apply(this, arguments);
+      };
+      OriginalXHR.prototype.send = function screenshot2bugSend(body) {
+        const xhr = this;
+        const meta = requests.get(xhr) ?? {
+          method: "GET",
+          url: window.location.href,
+          requestHeaders: {}
+        };
+        requests.set(xhr, meta);
+        const startedAt = performance.now();
+        const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+        const requestBody = previewBody(body);
+        let published = false;
+        const publishOnce = async (state, error) => {
+          if (published) return;
+          published = true;
+          const requestPreview = await requestBody;
+          const responseHeaders = parseRawHeaders(safeCall(() => xhr.getAllResponseHeaders()) || "");
+          const contentType = responseHeaders["content-type"];
+          const responsePreview = previewXhrResponse(xhr, contentType);
+          publishNetwork({
+            id: crypto.randomUUID(),
+            source: "page",
+            type: "xmlhttprequest",
+            method: meta.method,
+            url: meta.url,
+            timestamp,
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            durationMs: Math.round(performance.now() - startedAt),
+            status: xhr.status || void 0,
+            statusText: xhr.statusText || state,
+            ok: xhr.status >= 200 && xhr.status < 400,
+            requestHeaders: meta.requestHeaders,
+            responseHeaders,
+            requestBodyPreview: requestPreview?.preview,
+            requestBodyTruncated: requestPreview?.truncated,
+            responseBodyPreview: responsePreview?.preview,
+            responseBodyTruncated: responsePreview?.truncated,
+            responseBodyUnavailableReason: responsePreview?.unavailableReason,
+            responseContentType: contentType,
+            error
+          });
+        };
+        xhr.addEventListener("loadend", () => {
+          void publishOnce("complete");
+        });
+        xhr.addEventListener("error", () => {
+          void publishOnce("error", "XMLHttpRequest failed");
+        });
+        xhr.addEventListener("abort", () => {
+          void publishOnce("abort", "XMLHttpRequest aborted");
+        });
+        xhr.addEventListener("timeout", () => {
+          void publishOnce("timeout", "XMLHttpRequest timed out");
+        });
+        return originalSend.apply(xhr, arguments);
+      };
+    }
+    function describeFetchRequest(input, init = {}) {
+      const method = String(init?.method || input?.method || "GET").toUpperCase();
+      const url = String(input?.url || input || window.location.href);
+      const headers = {
+        ...input?.headers ? headersToRecord(input.headers) : {},
+        ...init?.headers ? headersToRecord(init.headers) : {}
+      };
+      return { method, url, headers };
+    }
+    async function previewFetchResponse(response) {
+      if (!response) return { unavailableReason: "no response object" };
+      if (response.bodyUsed) return { unavailableReason: "response body was already consumed" };
+      if (response.type === "opaque") return { unavailableReason: "opaque response" };
+      const contentType = response.headers.get("content-type") || "";
+      if (!isTextLike(contentType) || response.status === 204 || response.status === 304) {
+        return {
+          unavailableReason: response.status === 204 || response.status === 304 ? `status ${response.status} has no response body` : `non-text response (${contentType || "unknown content type"})`
+        };
+      }
+      try {
+        const clone = response.clone();
+        const preview = clone.body?.getReader ? await readStreamPreview(clone.body, contentType) : truncateAndSanitize(await clone.text(), contentType);
+        return preview?.preview ? preview : { ...preview, unavailableReason: "empty response body" };
+      } catch {
+        return { unavailableReason: "response body could not be read" };
+      }
+    }
+    function previewXhrResponse(xhr, contentType = "") {
+      if (!isTextLike(contentType) || xhr.responseType && xhr.responseType !== "text") {
+        return {
+          unavailableReason: xhr.responseType ? `XHR responseType ${xhr.responseType} is not text` : `non-text response (${contentType || "unknown content type"})`
+        };
+      }
+      try {
+        const preview = truncateAndSanitize(xhr.responseText || "", contentType);
+        return preview.preview ? preview : { ...preview, unavailableReason: "empty response body" };
+      } catch {
+        return { unavailableReason: "XHR response body could not be read" };
+      }
+    }
+    async function previewBody(body) {
+      if (body == null) return void 0;
+      try {
+        if (typeof body === "string") return truncateAndSanitize(body);
+        if (body instanceof URLSearchParams) return truncateAndSanitize(body.toString());
+        if (body instanceof FormData) return truncateAndSanitize(serializeFormData(body));
+        if (body instanceof Blob) {
+          if (!isTextLike(body.type)) {
+            return {
+              preview: `[${body.constructor.name}: ${body.type || "application/octet-stream"}, ${body.size} bytes]`,
+              truncated: false
+            };
+          }
+          return truncateAndSanitize(await body.slice(0, PREVIEW_LIMIT + 1).text(), body.type);
+        }
+        if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+          const bytes = body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+          return decodeBytesPreview(bytes);
+        }
+        if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
+          return {
+            preview: "[ReadableStream body not inspected]",
+            truncated: false
+          };
+        }
+        return truncateAndSanitize(String(body));
+      } catch {
+        return void 0;
+      }
+    }
+    async function readStreamPreview(stream, contentType = "") {
+      const reader = stream.getReader();
+      const chunks = [];
+      let received = 0;
+      let truncated = false;
+      try {
+        while (received <= PREVIEW_LIMIT) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          chunks.push(value);
+          received += value.byteLength ?? value.length ?? 0;
+          if (received > PREVIEW_LIMIT) {
+            truncated = true;
+            await reader.cancel();
+            break;
+          }
+        }
+      } catch {
+        return void 0;
+      }
+      const bytes = new Uint8Array(Math.min(received, PREVIEW_LIMIT));
+      let offset = 0;
+      for (const chunk of chunks) {
+        const view = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+        bytes.set(view.slice(0, bytes.length - offset), offset);
+        offset += view.byteLength;
+        if (offset >= bytes.length) break;
+      }
+      const decoded = new TextDecoder().decode(bytes);
+      const sanitized = sanitizePreview(decoded, contentType);
+      return { preview: sanitized, truncated };
+    }
+    function decodeBytesPreview(bytes) {
+      const truncated = bytes.byteLength > PREVIEW_LIMIT;
+      const previewBytes = bytes.slice(0, PREVIEW_LIMIT);
+      return {
+        preview: sanitizePreview(new TextDecoder().decode(previewBytes)),
+        truncated
+      };
+    }
+    function truncateAndSanitize(value, contentType = "") {
+      const truncated = value.length > PREVIEW_LIMIT;
+      return {
+        preview: sanitizePreview(value.slice(0, PREVIEW_LIMIT), contentType),
+        truncated
+      };
+    }
+    function sanitizeNetworkEntry(entry) {
+      return {
+        ...entry,
+        url: sanitizeUrl(entry.url),
+        requestHeaders: sanitizeHeaders(entry.requestHeaders),
+        responseHeaders: sanitizeHeaders(entry.responseHeaders),
+        requestBodyPreview: entry.requestBodyPreview ? sanitizePreview(entry.requestBodyPreview, entry.requestHeaders?.["content-type"]) : void 0,
+        responseBodyPreview: entry.responseBodyPreview ? sanitizePreview(entry.responseBodyPreview, entry.responseContentType) : void 0,
+        responseBodyUnavailableReason: entry.responseBodyUnavailableReason ? sanitizePreview(entry.responseBodyUnavailableReason) : void 0
+      };
+    }
+    function sanitizeHeaders(headers = {}) {
+      return Object.fromEntries(
+        Object.entries(headers).map(([name, value]) => [
+          name.toLowerCase(),
+          isSensitiveName(name) ? REDACTED : sanitizePreview(String(value))
+        ])
+      );
+    }
+    function sanitizeUrl(input) {
+      try {
+        const url = new URL(input, window.location.href);
+        for (const key of [...url.searchParams.keys()]) {
+          if (isSensitiveName(key)) url.searchParams.set(key, REDACTED);
+        }
+        return url.href;
+      } catch {
+        return sanitizePreview(String(input));
+      }
+    }
+    function sanitizePreview(value, contentType = "") {
+      let text = String(value);
+      if (isJsonLike(contentType) || looksJson(text)) {
+        try {
+          return JSON.stringify(redactJson(JSON.parse(text)), null, 2);
+        } catch {
+        }
+      }
+      if (contentType.includes("x-www-form-urlencoded") || looksFormEncoded(text)) {
+        try {
+          const params = new URLSearchParams(text);
+          for (const key of [...params.keys()]) {
+            if (isSensitiveName(key)) params.set(key, REDACTED);
+          }
+          text = params.toString();
+        } catch {
+        }
+      }
+      return text.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`).replace(
+        /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|secret|client[_-]?secret)=([^&\s]+)/gi,
+        `$1=${REDACTED}`
+      );
+    }
+    function redactJson(value) {
+      if (Array.isArray(value)) return value.map(redactJson);
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [
+          key,
+          isSensitiveName(key) ? REDACTED : redactJson(nested)
+        ])
+      );
+    }
+    function isSensitiveName(name = "") {
+      return /authorization|cookie|token|password|passwd|secret|api[-_]?key|session|credential|csrf|xsrf/i.test(
+        name
+      );
+    }
+    function isTextLike(contentType = "") {
+      return !contentType || /text|json|xml|javascript|typescript|html|css|svg|form-urlencoded/i.test(contentType);
+    }
+    function isJsonLike(contentType = "") {
+      return /json/i.test(contentType);
+    }
+    function looksJson(value) {
+      const text = value.trim();
+      return text.startsWith("{") && text.endsWith("}") || text.startsWith("[") && text.endsWith("]");
+    }
+    function looksFormEncoded(value) {
+      return /^[^=\s&]+=[\s\S]*(&[^=\s&]+=[\s\S]*)*$/.test(value.trim());
+    }
+    function headersToRecord(headers) {
+      const record = {};
+      try {
+        if (headers instanceof Headers) {
+          headers.forEach((value, key) => {
+            record[key] = value;
+          });
+          return record;
+        }
+        if (Array.isArray(headers)) {
+          for (const [key, value] of headers) record[String(key)] = String(value);
+          return record;
+        }
+        for (const [key, value] of Object.entries(headers ?? {})) {
+          record[key] = Array.isArray(value) ? value.join(", ") : String(value);
+        }
+      } catch {
+        return record;
+      }
+      return record;
+    }
+    function parseRawHeaders(raw) {
+      const headers = {};
+      for (const line of raw.split(/\r?\n/)) {
+        const index = line.indexOf(":");
+        if (index === -1) continue;
+        headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+      }
+      return headers;
+    }
+    function serializeFormData(formData) {
+      const values = {};
+      for (const [key, value] of formData.entries()) {
+        values[key] = value instanceof File ? `[File: ${value.name}, ${value.type || "application/octet-stream"}, ${value.size} bytes]` : value;
+      }
+      return JSON.stringify(values);
+    }
+    function safeCall(fn) {
+      try {
+        return fn();
+      } catch {
+        return void 0;
+      }
+    }
+  })();
+})();

@@ -27,7 +27,8 @@
     "<all_urls>",
     "https://api.openai.com/*",
     "https://api.github.com/*",
-    "https://github.com/*"
+    "https://github.com/*",
+    "https://api.cloudinary.com/*"
   ],
   "commands": {
     "capture-screenshot-full": {

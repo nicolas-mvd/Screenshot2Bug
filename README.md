@@ -63,7 +63,11 @@ Screenshot2Bug can create a GitHub issue from the current bug report.
 4. Click **Connect GitHub**, authorize the device code, and select a repository.
 5. Capture or open a report, then click **Create GitHub issue**.
 
-The GitHub token is stored locally in Chrome extension storage. Screenshots and recordings are not uploaded to GitHub in this version; they remain available through the local ZIP export.
+The GitHub token is stored locally in Chrome extension storage. Screenshots can be uploaded to Cloudinary and embedded in the issue; recordings remain available through the local ZIP export.
+
+## Image Uploads
+
+To attach screenshots to GitHub issues without committing files to the repository, create a Cloudinary unsigned upload preset. Add the Cloudinary cloud name and preset name from the Screenshot2Bug settings page before creating an issue.
 
 ## Test Page
 

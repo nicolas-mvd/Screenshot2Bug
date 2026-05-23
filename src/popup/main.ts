@@ -3,7 +3,9 @@ import { buildTemplateReport, generateAiReport } from "../shared/report";
 import { getSettings, getSortedSessions } from "../shared/storage";
 import { DEFAULT_MODEL } from "../shared/types";
 import { buildReportZip } from "../shared/zip";
+import { uploadCloudinaryScreenshots } from "../shared/cloudinary";
 import { buildGitHubIssue, createGitHubIssue } from "../shared/github";
+import type { IssueScreenshotLink } from "../shared/github";
 import type {
   BackgroundResponse,
   CaptureArea,
@@ -573,7 +575,8 @@ async function saveEdit(): Promise<void> {
           ...item,
           dataUrl: editedDataUrl,
           originalDataUrl: item.originalDataUrl ?? item.dataUrl,
-          editedAt: new Date().toISOString()
+          editedAt: new Date().toISOString(),
+          upload: undefined
         }
       : item
   );
@@ -802,10 +805,37 @@ async function createIssue(): Promise<void> {
       githubStatusMessage = "Select a GitHub repository in Settings first.";
       return;
     }
+    const screenshots = session.screenshots ?? [];
+    let screenshotLinks: IssueScreenshotLink[] = [];
+    if (screenshots.length) {
+      busyLabel = "Uploading screenshots...";
+      render();
+      const uploaded = await uploadCloudinaryScreenshots({
+        settings: {
+          cloudName: settings.cloudinaryCloudName ?? "",
+          uploadPreset: settings.cloudinaryUploadPreset ?? ""
+        },
+        session
+      });
+      session = await request<CaptureSession>({
+        type: "UPDATE_SESSION",
+        sessionId: session.id,
+        patch: {
+          screenshots: uploaded.screenshots,
+          screenshotDataUrl: uploaded.screenshots.at(-1)?.dataUrl
+        }
+      });
+      screenshotLinks = uploaded.links;
+      await refreshSessions();
+    }
+
+    busyLabel = "Creating...";
+    render();
     const issue = buildGitHubIssue({
       session,
       report,
-      labels: settings.githubDefaultLabels ?? ["bug"]
+      labels: settings.githubDefaultLabels ?? ["bug"],
+      screenshotLinks
     });
     const created = await createGitHubIssue(
       settings.githubAccessToken,
@@ -881,7 +911,7 @@ function statusCopy(current: CaptureSession): string {
 }
 
 function renderGitHubHelp(): string {
-  return "Creates an issue in the repository selected in Settings. Screenshots and recordings stay in the local ZIP export.";
+  return "Creates an issue in the repository selected in Settings. Screenshots upload to Cloudinary; recordings stay in the local ZIP export.";
 }
 
 function formatDate(value: string): string {

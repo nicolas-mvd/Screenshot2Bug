@@ -1,9 +1,17 @@
-import type { CaptureSession, ConsoleEntry, NetworkEntry } from "./types";
+import type {
+  CaptureSession,
+  ConsoleEntry,
+  NetworkEntry
+} from "./types";
 
 export const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
 export const GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 export const GITHUB_API_URL = "https://api.github.com";
 export const GITHUB_SCOPES = "repo";
+const GITHUB_ISSUE_BODY_LIMIT = 65536;
+const GITHUB_ISSUE_BODY_TARGET = 64000;
+const RAW_CONSOLE_JSON_LIMIT = 8000;
+const RAW_NETWORK_JSON_LIMIT = 24000;
 
 export interface GitHubDeviceFlow {
   device_code: string;
@@ -24,12 +32,20 @@ export interface GitHubRepoSelection {
   name: string;
   fullName: string;
   private?: boolean;
+  defaultBranch?: string;
 }
 
 export interface GitHubIssueInput {
   title: string;
   body: string;
   labels: string[];
+}
+
+export interface IssueScreenshotLink {
+  screenshotId: string;
+  label: string;
+  markdownUrl: string;
+  path: string;
 }
 
 export async function startGitHubDeviceFlow(clientId: string): Promise<GitHubDeviceFlow> {
@@ -132,7 +148,8 @@ export async function listGitHubRepositories(token: string): Promise<GitHubRepoS
       owner: repo.owner.login,
       name: repo.name,
       fullName: repo.full_name,
-      private: repo.private
+      private: repo.private,
+      defaultBranch: repo.default_branch
     }))
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
@@ -142,23 +159,32 @@ export async function createGitHubIssue(
   repo: GitHubRepoSelection,
   issue: GitHubIssueInput
 ): Promise<{ html_url: string; number: number }> {
-  return githubFetch(token, `/repos/${repo.owner}/${repo.name}/issues`, {
-    method: "POST",
-    body: JSON.stringify(issue)
-  });
+  try {
+    return await createGitHubIssueRequest(token, repo, issue);
+  } catch (error) {
+    if (issue.labels.length && isLabelValidationError(error)) {
+      return createGitHubIssueRequest(token, repo, { ...issue, labels: [] });
+    }
+    throw error;
+  }
 }
 
 export function buildGitHubIssue({
   session,
   report,
-  labels = ["bug"]
+  labels = ["bug"],
+  screenshotLinks = []
 }: {
   session: Pick<CaptureSession, "id" | "metadata" | "consoleErrors" | "networkRequests">;
   report: string;
   labels?: string[];
+  screenshotLinks?: IssueScreenshotLink[];
 }): GitHubIssueInput {
   const title = buildIssueTitle(session, report);
-  const body = `${report.trim()}
+  const screenshots = formatScreenshotLinks(screenshotLinks);
+  const body = fitGitHubIssueBody(`${report.trim()}
+
+${screenshots}
 
 ---
 
@@ -172,7 +198,7 @@ ${formatRawNetwork(session.networkRequests)}
 
 Created with Screenshot2Bug.
 
-Note: screenshots and recordings are kept in the local ZIP export for this report and are not uploaded to GitHub in this version.`;
+Note: uploaded screenshots are hosted on the configured image service. Recordings remain available through the local ZIP export.`);
   return {
     title,
     body,
@@ -216,16 +242,53 @@ function normalizeIssueTitle(title: string): string {
 
 function formatRawConsole(entries: ConsoleEntry[]): string {
   if (!entries.length) return "_No raw console entries captured._";
-  return fencedJson(entries);
+  return fencedJson(entries, RAW_CONSOLE_JSON_LIMIT);
 }
 
 function formatRawNetwork(entries: NetworkEntry[]): string {
   if (!entries.length) return "_No raw network entries captured._";
-  return fencedJson(entries);
+  return fencedJson(entries, RAW_NETWORK_JSON_LIMIT);
 }
 
-function fencedJson(value: unknown): string {
-  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
+function formatScreenshotLinks(links: IssueScreenshotLink[]): string {
+  if (!links.length) return "## Screenshots\n_No screenshots uploaded._";
+  return `## Screenshots\n${links
+    .map((link) => `![${link.label}](${link.markdownUrl})`)
+    .join("\n\n")}`;
+}
+
+function createGitHubIssueRequest(
+  token: string,
+  repo: GitHubRepoSelection,
+  issue: GitHubIssueInput
+): Promise<{ html_url: string; number: number }> {
+  return githubFetch(token, `/repos/${repo.owner}/${repo.name}/issues`, {
+    method: "POST",
+    body: JSON.stringify(issue)
+  });
+}
+
+function fencedJson(value: unknown, maxJsonChars?: number): string {
+  const json = JSON.stringify(value, null, 2);
+  if (!maxJsonChars || json.length <= maxJsonChars) {
+    return `\`\`\`json\n${json}\n\`\`\``;
+  }
+
+  const omitted = json.length - maxJsonChars;
+  return `\`\`\`json\n${json.slice(0, maxJsonChars).trimEnd()}
+... truncated ${omitted} characters; full evidence remains in the ZIP export ...
+\`\`\``;
+}
+
+function fitGitHubIssueBody(body: string): string {
+  if (body.length <= GITHUB_ISSUE_BODY_TARGET) return body;
+
+  const suffix = `
+
+---
+
+_Issue body truncated to fit GitHub's ${GITHUB_ISSUE_BODY_LIMIT} character limit. Full evidence remains in the ZIP export._`;
+  return `${body.slice(0, GITHUB_ISSUE_BODY_TARGET - suffix.length).trimEnd()}${suffix}`;
 }
 
 async function githubFetch<T = any>(token: string, path: string, init: RequestInit = {}): Promise<T> {
@@ -246,10 +309,47 @@ async function parseGitHubResponse<T = any>(response: Response): Promise<T> {
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    const message = data.message || `GitHub request failed with ${response.status}`;
-    throw new Error(message);
+    const message = formatGitHubErrorMessage(data, response.status);
+    const error = new Error(message) as Error & {
+      status?: number;
+      errors?: unknown[];
+    };
+    error.status = response.status;
+    error.errors = Array.isArray(data.errors) ? data.errors : undefined;
+    throw error;
   }
   return data;
+}
+
+function formatGitHubErrorMessage(data: any, status: number): string {
+  const message = data?.message || `GitHub request failed with ${status}`;
+  const details = Array.isArray(data?.errors)
+    ? data.errors.map(formatGitHubErrorDetail).filter(Boolean)
+    : [];
+  return details.length ? `${message}: ${details.join("; ")}` : message;
+}
+
+function formatGitHubErrorDetail(detail: any): string {
+  if (typeof detail === "string") return detail;
+  if (!detail || typeof detail !== "object") return "";
+  return [detail.resource, detail.field, detail.code, detail.message]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isLabelValidationError(error: unknown): boolean {
+  const typed = error as Error & { status?: number; errors?: unknown[] };
+  if (typed.status !== 422) return false;
+  const message = typed.message.toLowerCase();
+  if (message.includes("label")) return true;
+  return (typed.errors ?? []).some((detail) => {
+    if (!detail || typeof detail !== "object") return false;
+    const values = Object.values(detail as Record<string, unknown>)
+      .map(String)
+      .join(" ")
+      .toLowerCase();
+    return values.includes("label");
+  });
 }
 
 function sleep(ms: number): Promise<void> {

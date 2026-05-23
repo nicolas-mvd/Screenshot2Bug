@@ -49,6 +49,29 @@ export interface NetworkEntry {
   error?: string;
 }
 
+export interface GitHubEvidenceUploadMetadata {
+  provider: "github";
+  repoFullName: string;
+  branch: string;
+  path: string;
+  markdownUrl: string;
+  uploadedAt: string;
+}
+
+export interface CloudinaryEvidenceUploadMetadata {
+  provider: "cloudinary";
+  cloudName: string;
+  uploadPreset: string;
+  publicId: string;
+  secureUrl: string;
+  markdownUrl: string;
+  uploadedAt: string;
+}
+
+export type EvidenceUploadMetadata =
+  | GitHubEvidenceUploadMetadata
+  | CloudinaryEvidenceUploadMetadata;
+
 export interface EvidenceAttachment {
   id: string;
   dataUrl: string;
@@ -59,6 +82,7 @@ export interface EvidenceAttachment {
   region?: CaptureRegion;
   originalDataUrl?: string;
   editedAt?: string;
+  upload?: EvidenceUploadMetadata;
 }
 
 export interface RecordingAttachment extends EvidenceAttachment {
@@ -125,8 +149,11 @@ export interface Settings {
     name: string;
     fullName: string;
     private?: boolean;
+    defaultBranch?: string;
   };
   githubDefaultLabels?: string[];
+  cloudinaryCloudName?: string;
+  cloudinaryUploadPreset?: string;
 }
 
 export interface BackgroundResponse<T = unknown> {

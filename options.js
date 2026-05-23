@@ -3,7 +3,8 @@ var STORAGE_KEYS = {
   latestSessionId: "latestSessionId",
   settings: "settings",
   sessions: "sessions",
-  consolePrefix: "console:"
+  consolePrefix: "console:",
+  networkPrefix: "network:"
 };
 var DEFAULT_MODEL = "gpt-5";
 
@@ -103,7 +104,8 @@ async function listGitHubRepositories(token) {
     owner: repo.owner.login,
     name: repo.name,
     fullName: repo.full_name,
-    private: repo.private
+    private: repo.private,
+    defaultBranch: repo.default_branch
   })).sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 async function githubFetch(token, path, init2 = {}) {
@@ -123,10 +125,23 @@ async function parseGitHubResponse(response) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    const message2 = data.message || `GitHub request failed with ${response.status}`;
-    throw new Error(message2);
+    const message2 = formatGitHubErrorMessage(data, response.status);
+    const error = new Error(message2);
+    error.status = response.status;
+    error.errors = Array.isArray(data.errors) ? data.errors : void 0;
+    throw error;
   }
   return data;
+}
+function formatGitHubErrorMessage(data, status) {
+  const message2 = data?.message || `GitHub request failed with ${status}`;
+  const details = Array.isArray(data?.errors) ? data.errors.map(formatGitHubErrorDetail).filter(Boolean) : [];
+  return details.length ? `${message2}: ${details.join("; ")}` : message2;
+}
+function formatGitHubErrorDetail(detail) {
+  if (typeof detail === "string") return detail;
+  if (!detail || typeof detail !== "object") return "";
+  return [detail.resource, detail.field, detail.code, detail.message].filter(Boolean).join(" ");
 }
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -196,6 +211,22 @@ function render() {
       </section>
 
       <section class="panel">
+        <h2>Image uploads</h2>
+        <label class="field">
+          <span>Cloudinary cloud name</span>
+          <input id="cloudinaryCloudNameInput" type="text" value="${escapeHtml(settings.cloudinaryCloudName ?? "")}" placeholder="your-cloud-name" />
+        </label>
+
+        <label class="field">
+          <span>Unsigned upload preset</span>
+          <input id="cloudinaryUploadPresetInput" type="text" value="${escapeHtml(settings.cloudinaryUploadPreset ?? "")}" placeholder="screenshot2bug" />
+        </label>
+
+        <p class="muted">Screenshots upload to Cloudinary before GitHub issue creation. Use an unsigned preset with image uploads enabled.</p>
+        <button class="primary" id="saveCloudinaryButton">Save image upload settings</button>
+      </section>
+
+      <section class="panel">
         <h2>Shortcuts</h2>
         <p class="muted">Defaults are Option+Shift+S for full-tab screenshots, Option+Shift+A for selected-area screenshots, Option+Shift+V for full-tab videos, and Option+Shift+R for selected-area videos. Chrome lets you remap them from the extensions shortcuts page.</p>
         <button id="shortcutsButton">Open Chrome shortcuts</button>
@@ -203,6 +234,7 @@ function render() {
     </section>
   `;
   document.querySelector("#saveAiButton")?.addEventListener("click", () => void saveAi());
+  document.querySelector("#saveCloudinaryButton")?.addEventListener("click", () => void saveCloudinary());
   document.querySelector("#connectGitHubButton")?.addEventListener("click", () => void connectGitHub());
   document.querySelector("#disconnectGitHubButton")?.addEventListener("click", () => void disconnectGitHub());
   document.querySelector("#repoSelect")?.addEventListener("change", (event) => {
@@ -238,6 +270,14 @@ async function saveAi() {
   settings = { ...settings, openaiApiKey, openaiModel };
   await saveSettings(settings);
   message = "AI settings saved.";
+  render();
+}
+async function saveCloudinary() {
+  const cloudinaryCloudName = document.querySelector("#cloudinaryCloudNameInput")?.value.trim();
+  const cloudinaryUploadPreset = document.querySelector("#cloudinaryUploadPresetInput")?.value.trim();
+  settings = { ...settings, cloudinaryCloudName, cloudinaryUploadPreset };
+  await saveSettings(settings);
+  message = "Image upload settings saved.";
   render();
 }
 async function connectGitHub() {
@@ -286,8 +326,13 @@ async function refreshRepos(showMessage) {
   if (!settings.githubAccessToken) return;
   try {
     repos = await listGitHubRepositories(settings.githubAccessToken);
-    if (settings.githubSelectedRepo && !repos.some((repo) => repo.fullName === settings.githubSelectedRepo?.fullName)) {
-      settings = { ...settings, githubSelectedRepo: void 0 };
+    if (settings.githubSelectedRepo) {
+      const selected = repos.find((repo) => repo.fullName === settings.githubSelectedRepo?.fullName);
+      if (selected) {
+        settings = { ...settings, githubSelectedRepo: selected };
+      } else {
+        settings = { ...settings, githubSelectedRepo: void 0 };
+      }
       await saveSettings(settings);
     }
     if (showMessage) message = "Repositories refreshed.";

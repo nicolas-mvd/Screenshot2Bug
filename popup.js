@@ -104,13 +104,12 @@ function formatNetworkRequests(session2) {
   return coalesceNetworkRequests(session2.networkRequests).sort((first, second) => Number(isNetworkFailure(second)) - Number(isNetworkFailure(first))).slice(0, 20).map((entry) => {
     const status = entry.error ? `error: ${entry.error}` : typeof entry.status === "number" ? `${entry.status}${entry.statusText ? ` ${entry.statusText}` : ""}` : "no status";
     const duration = typeof entry.durationMs === "number" ? ` in ${entry.durationMs}ms` : "";
-    const request = entry.requestBodyPreview ? `\n  request: ${singleLine(entry.requestBodyPreview)}` : "";
-    const response = entry.responseBodyPreview
-      ? `\n  response: ${singleLine(entry.responseBodyPreview)}`
-      : entry.responseBodyUnavailableReason
-        ? `\n  response: unavailable (${singleLine(entry.responseBodyUnavailableReason)})`
-        : "";
-    return `- [${entry.timestamp}] ${entry.method} ${entry.url} -> ${status}${duration}${request}${response}`;
+    const request2 = entry.requestBodyPreview ? `
+  request: ${singleLine(entry.requestBodyPreview)}` : "";
+    const response = entry.responseBodyPreview ? `
+  response: ${singleLine(entry.responseBodyPreview)}` : entry.responseBodyUnavailableReason ? `
+  response: unavailable (${singleLine(entry.responseBodyUnavailableReason)})` : "";
+    return `- [${entry.timestamp}] ${entry.method} ${entry.url} -> ${status}${duration}${request2}${response}`;
   }).join("\n");
 }
 function coalesceNetworkRequests(entries) {
@@ -133,7 +132,9 @@ function isDuplicateNetworkEntry(first, second) {
   return !Number.isNaN(firstTime) && !Number.isNaN(secondTime) && Math.abs(firstTime - secondTime) < 5e3;
 }
 function preferNetworkEntry(first, second) {
-  const primary = networkEntryScore(second) > networkEntryScore(first) ? second : first;
+  const firstScore = networkEntryScore(first);
+  const secondScore = networkEntryScore(second);
+  const primary = secondScore > firstScore ? second : first;
   const secondary = primary === first ? second : first;
   return {
     ...secondary,
@@ -333,35 +334,123 @@ var CRC_TABLE = (() => {
   return table;
 })();
 
+// src/shared/cloudinary.ts
+async function uploadCloudinaryScreenshots({
+  settings,
+  session: session2
+}) {
+  const cloudName = settings.cloudName.trim();
+  const uploadPreset = settings.uploadPreset.trim();
+  if (!cloudName || !uploadPreset) {
+    throw new Error("Add a Cloudinary cloud name and unsigned upload preset in Settings first.");
+  }
+  const screenshots = session2.screenshots ?? [];
+  const updatedScreenshots = [];
+  const links = [];
+  for (const [index, screenshot] of screenshots.entries()) {
+    const label = `Screenshot ${index + 1}`;
+    const existing = screenshot.upload;
+    if (existing?.provider === "cloudinary" && existing.cloudName === cloudName && existing.uploadPreset === uploadPreset && existing.markdownUrl) {
+      updatedScreenshots.push(screenshot);
+      links.push({
+        screenshotId: screenshot.id,
+        label,
+        markdownUrl: existing.markdownUrl,
+        path: existing.publicId
+      });
+      continue;
+    }
+    const uploaded = await uploadCloudinaryImage({
+      cloudName,
+      uploadPreset,
+      dataUrl: screenshot.dataUrl
+    });
+    const upload = {
+      provider: "cloudinary",
+      cloudName,
+      uploadPreset,
+      publicId: uploaded.public_id,
+      secureUrl: uploaded.secure_url,
+      markdownUrl: uploaded.secure_url,
+      uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const updated = { ...screenshot, upload };
+    updatedScreenshots.push(updated);
+    links.push({
+      screenshotId: screenshot.id,
+      label,
+      markdownUrl: upload.markdownUrl,
+      path: upload.publicId
+    });
+  }
+  return { screenshots: updatedScreenshots, links };
+}
+async function uploadCloudinaryImage({
+  cloudName,
+  uploadPreset,
+  dataUrl
+}) {
+  const form = new FormData();
+  form.set("file", dataUrl);
+  form.set("upload_preset", uploadPreset);
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
+    {
+      method: "POST",
+      body: form
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error?.message || `Cloudinary upload failed with ${response.status}`);
+  }
+  if (!data.secure_url || !data.public_id) {
+    throw new Error("Cloudinary upload did not return an image URL.");
+  }
+  return data;
+}
+
 // src/shared/github.ts
 var GITHUB_API_URL = "https://api.github.com";
+var GITHUB_ISSUE_BODY_LIMIT = 65536;
+var GITHUB_ISSUE_BODY_TARGET = 64e3;
+var RAW_CONSOLE_JSON_LIMIT = 8e3;
+var RAW_NETWORK_JSON_LIMIT = 24e3;
 async function createGitHubIssue(token, repo, issue) {
-  return githubFetch(token, `/repos/${repo.owner}/${repo.name}/issues`, {
-    method: "POST",
-    body: JSON.stringify(issue)
-  });
+  try {
+    return await createGitHubIssueRequest(token, repo, issue);
+  } catch (error) {
+    if (issue.labels.length && isLabelValidationError(error)) {
+      return createGitHubIssueRequest(token, repo, { ...issue, labels: [] });
+    }
+    throw error;
+  }
 }
 function buildGitHubIssue({
   session: session2,
   report: report2,
-  labels = ["bug"]
+  labels = ["bug"],
+  screenshotLinks = []
 }) {
   const title = buildIssueTitle(session2, report2);
-  const body = `${report2.trim()}
+  const screenshots = formatScreenshotLinks(screenshotLinks);
+  const body = fitGitHubIssueBody(`${report2.trim()}
+
+${screenshots}
 
 ---
 
 ## RAW Console
-${formatRawConsole(session2.consoleErrors ?? [])}
+${formatRawConsole(session2.consoleErrors)}
 
 ## RAW Network
-${formatRawNetwork(session2.networkRequests ?? [])}
+${formatRawNetwork(session2.networkRequests)}
 
 ---
 
 Created with Screenshot2Bug.
 
-Note: screenshots and recordings are kept in the local ZIP export for this report and are not uploaded to GitHub in this version.`;
+Note: uploaded screenshots are hosted on the configured image service. Recordings remain available through the local ZIP export.`);
   return {
     title,
     body,
@@ -391,14 +480,44 @@ function normalizeIssueTitle(title) {
 }
 function formatRawConsole(entries) {
   if (!entries.length) return "_No raw console entries captured._";
-  return fencedJson(entries);
+  return fencedJson(entries, RAW_CONSOLE_JSON_LIMIT);
 }
 function formatRawNetwork(entries) {
   if (!entries.length) return "_No raw network entries captured._";
-  return fencedJson(entries);
+  return fencedJson(entries, RAW_NETWORK_JSON_LIMIT);
 }
-function fencedJson(value) {
-  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
+function formatScreenshotLinks(links) {
+  if (!links.length) return "## Screenshots\n_No screenshots uploaded._";
+  return `## Screenshots
+${links.map((link) => `![${link.label}](${link.markdownUrl})`).join("\n\n")}`;
+}
+function createGitHubIssueRequest(token, repo, issue) {
+  return githubFetch(token, `/repos/${repo.owner}/${repo.name}/issues`, {
+    method: "POST",
+    body: JSON.stringify(issue)
+  });
+}
+function fencedJson(value, maxJsonChars) {
+  const json = JSON.stringify(value, null, 2);
+  if (!maxJsonChars || json.length <= maxJsonChars) {
+    return `\`\`\`json
+${json}
+\`\`\``;
+  }
+  const omitted = json.length - maxJsonChars;
+  return `\`\`\`json
+${json.slice(0, maxJsonChars).trimEnd()}
+... truncated ${omitted} characters; full evidence remains in the ZIP export ...
+\`\`\``;
+}
+function fitGitHubIssueBody(body) {
+  if (body.length <= GITHUB_ISSUE_BODY_TARGET) return body;
+  const suffix = `
+
+---
+
+_Issue body truncated to fit GitHub's ${GITHUB_ISSUE_BODY_LIMIT} character limit. Full evidence remains in the ZIP export._`;
+  return `${body.slice(0, GITHUB_ISSUE_BODY_TARGET - suffix.length).trimEnd()}${suffix}`;
 }
 async function githubFetch(token, path, init2 = {}) {
   const response = await fetch(`${GITHUB_API_URL}${path}`, {
@@ -417,10 +536,34 @@ async function parseGitHubResponse(response) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    const message = data.message || `GitHub request failed with ${response.status}`;
-    throw new Error(message);
+    const message = formatGitHubErrorMessage(data, response.status);
+    const error = new Error(message);
+    error.status = response.status;
+    error.errors = Array.isArray(data.errors) ? data.errors : void 0;
+    throw error;
   }
   return data;
+}
+function formatGitHubErrorMessage(data, status) {
+  const message = data?.message || `GitHub request failed with ${status}`;
+  const details = Array.isArray(data?.errors) ? data.errors.map(formatGitHubErrorDetail).filter(Boolean) : [];
+  return details.length ? `${message}: ${details.join("; ")}` : message;
+}
+function formatGitHubErrorDetail(detail) {
+  if (typeof detail === "string") return detail;
+  if (!detail || typeof detail !== "object") return "";
+  return [detail.resource, detail.field, detail.code, detail.message].filter(Boolean).join(" ");
+}
+function isLabelValidationError(error) {
+  const typed = error;
+  if (typed.status !== 422) return false;
+  const message = typed.message.toLowerCase();
+  if (message.includes("label")) return true;
+  return (typed.errors ?? []).some((detail) => {
+    if (!detail || typeof detail !== "object") return false;
+    const values = Object.values(detail).map(String).join(" ").toLowerCase();
+    return values.includes("label");
+  });
 }
 
 // src/popup/main.ts
@@ -925,7 +1068,8 @@ async function saveEdit() {
       ...item,
       dataUrl: editedDataUrl,
       originalDataUrl: item.originalDataUrl ?? item.dataUrl,
-      editedAt: (/* @__PURE__ */ new Date()).toISOString()
+      editedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      upload: void 0
     } : item
   );
   session = await request({
@@ -1113,10 +1257,36 @@ async function createIssue() {
       githubStatusMessage = "Select a GitHub repository in Settings first.";
       return;
     }
+    const screenshots = session.screenshots ?? [];
+    let screenshotLinks = [];
+    if (screenshots.length) {
+      busyLabel = "Uploading screenshots...";
+      render();
+      const uploaded = await uploadCloudinaryScreenshots({
+        settings: {
+          cloudName: settings.cloudinaryCloudName ?? "",
+          uploadPreset: settings.cloudinaryUploadPreset ?? ""
+        },
+        session
+      });
+      session = await request({
+        type: "UPDATE_SESSION",
+        sessionId: session.id,
+        patch: {
+          screenshots: uploaded.screenshots,
+          screenshotDataUrl: uploaded.screenshots.at(-1)?.dataUrl
+        }
+      });
+      screenshotLinks = uploaded.links;
+      await refreshSessions();
+    }
+    busyLabel = "Creating...";
+    render();
     const issue = buildGitHubIssue({
       session,
       report,
-      labels: settings.githubDefaultLabels ?? ["bug"]
+      labels: settings.githubDefaultLabels ?? ["bug"],
+      screenshotLinks
     });
     const created = await createGitHubIssue(
       settings.githubAccessToken,
@@ -1180,7 +1350,7 @@ function statusCopy(current) {
   return "No evidence attached yet";
 }
 function renderGitHubHelp() {
-  return "Creates an issue in the repository selected in Settings. Screenshots and recordings stay in the local ZIP export.";
+  return "Creates an issue in the repository selected in Settings. Screenshots upload to Cloudinary; recordings stay in the local ZIP export.";
 }
 function formatDate(value) {
   return new Intl.DateTimeFormat(void 0, {

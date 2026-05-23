@@ -17,6 +17,7 @@ import type {
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root.");
 const root = app;
+const DONATE_URL = "https://buymeacoffee.com/screenshot2bug";
 
 let session: CaptureSession | undefined;
 let sessions: CaptureSession[] = [];
@@ -57,55 +58,78 @@ async function init(): Promise<void> {
 
 function render(): void {
   root.innerHTML = `
-    <section class="shell">
-      <header class="topbar">
-        <div>
+    <section class="shell popup-shell">
+      <header class="popup-appbar">
+        <div class="brand-lockup popup-brand">
+          <span class="nav-icon" aria-hidden="true">☷</span>
+          <span>BugReporter</span>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button large" id="settingsButton" title="Settings" aria-label="Settings">⚙</button>
+        </div>
+      </header>
+
+      <main class="popup-content">
+        <div class="popup-heading">
           <p class="eyebrow">Screenshot2Bug</p>
           <h1>${session ? modeTitle(session) : "Capture a bug"}</h1>
         </div>
-        <button class="icon-button" id="settingsButton" title="Settings" aria-label="Settings">⚙</button>
-      </header>
 
-      ${statusMessage ? `<p class="notice">${escapeHtml(statusMessage)}</p>` : ""}
-      ${session?.notice ? `<p class="notice">${escapeHtml(session.notice)}</p>` : ""}
-      ${session?.error ? `<p class="error">${escapeHtml(session.error)}</p>` : ""}
+        ${statusMessage ? `<p class="notice">${escapeHtml(statusMessage)}</p>` : ""}
+        ${session?.notice ? `<p class="notice">${escapeHtml(session.notice)}</p>` : ""}
+        ${session?.error ? `<p class="error">${escapeHtml(session.error)}</p>` : ""}
 
-      <section class="panel">
-        <h2>New capture</h2>
-        <div class="capture-grid">
-          <button class="mode-card" id="screenshotFullButton">
-            <span class="mode-icon">▣</span>
-            <span>
-              <strong>Screenshot</strong>
-              <small>Full tab</small>
-            </span>
-          </button>
-          <button class="mode-card" id="screenshotRegionButton">
-            <span class="mode-icon">⌖</span>
-            <span>
-              <strong>Screenshot</strong>
-              <small>Select area</small>
-            </span>
-          </button>
-          <button class="mode-card" id="videoFullButton">
-            <span class="mode-icon">●</span>
-            <span>
-              <strong>Video</strong>
-              <small>Full tab</small>
-            </span>
-          </button>
-          <button class="mode-card" id="videoRegionButton">
-            <span class="mode-icon">◉</span>
-            <span>
-              <strong>Video</strong>
-              <small>Select area</small>
-            </span>
-          </button>
-        </div>
-      </section>
+        <section class="panel capture-panel">
+          <div class="capture-grid">
+            <button class="mode-card" id="screenshotFullButton">
+              <span class="mode-icon">▣</span>
+              <span>
+                <strong>Screenshot</strong>
+                <small>Full tab</small>
+              </span>
+            </button>
+            <button class="mode-card" id="screenshotRegionButton">
+              <span class="mode-icon">⌖</span>
+              <span>
+                <strong>Screenshot</strong>
+                <small>Select area</small>
+              </span>
+            </button>
+            <button class="mode-card" id="videoFullButton">
+              <span class="mode-icon">●</span>
+              <span>
+                <strong>Video</strong>
+                <small>Full tab</small>
+              </span>
+            </button>
+            <button class="mode-card" id="videoRegionButton">
+              <span class="mode-icon">◉</span>
+              <span>
+                <strong>Video</strong>
+                <small>Select area</small>
+              </span>
+            </button>
+          </div>
+        </section>
 
-      ${session ? renderSession(session) : renderEmpty()}
-      ${renderReportsList()}
+        ${session ? renderSession(session) : renderEmpty()}
+        ${renderReportsList()}
+      </main>
+
+      <footer class="popup-bottom-nav" aria-label="Extension navigation">
+        <button id="footerCaptureButton">
+          <span aria-hidden="true">⌗</span>
+          <small>Capture</small>
+        </button>
+        <button id="footerReportsButton">
+          <span aria-hidden="true">▦</span>
+          <small>Reports</small>
+        </button>
+        <button id="footerSettingsButton">
+          <span aria-hidden="true">⚙</span>
+          <small>Settings</small>
+        </button>
+      </footer>
     </section>
   `;
 
@@ -115,7 +139,7 @@ function render(): void {
 
 function renderEmpty(): string {
   return `
-    <section class="panel">
+    <section class="empty-state">
       <h2>Ready when the bug is.</h2>
       <p class="muted">Start a new report above. Old drafts will appear in the Reports list.</p>
     </section>
@@ -186,9 +210,10 @@ function renderSession(current: CaptureSession): string {
       <textarea id="reportOutput" rows="12">${escapeHtml(report)}</textarea>
     </label>
 
-    <div class="actions">
+    <div class="actions export-actions">
       <button id="copyButton" ${!report ? "disabled" : ""}>Copy Markdown</button>
       <button id="downloadButton" ${!report ? "disabled" : ""}>Download ZIP</button>
+      <button id="openFolderButton">Open folder</button>
     </div>
 
     <section class="panel">
@@ -296,7 +321,7 @@ function renderReportsList(): string {
     })
     .join("");
   return `
-    <section class="panel">
+    <section class="reports-section" id="reportsSection">
       <h2>Reports</h2>
       <div class="report-list">${rows}</div>
     </section>
@@ -306,6 +331,15 @@ function renderReportsList(): string {
 function bindEvents(): void {
   document.querySelector("#settingsButton")?.addEventListener("click", () => {
     void chrome.runtime.openOptionsPage();
+  });
+  document.querySelector("#footerSettingsButton")?.addEventListener("click", () => {
+    void chrome.runtime.openOptionsPage();
+  });
+  document.querySelector("#footerCaptureButton")?.addEventListener("click", () => {
+    document.querySelector(".popup-heading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  document.querySelector("#footerReportsButton")?.addEventListener("click", () => {
+    document.querySelector("#reportsSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   document.querySelector("#screenshotFullButton")?.addEventListener("click", () => {
     void runCapture({ type: "CAPTURE_SCREENSHOT", area: "full" });
@@ -351,6 +385,7 @@ function bindEvents(): void {
   document.querySelector("#aiButton")?.addEventListener("click", () => void generateReport());
   document.querySelector("#copyButton")?.addEventListener("click", () => void copyReport());
   document.querySelector("#downloadButton")?.addEventListener("click", () => void downloadBundle());
+  document.querySelector("#openFolderButton")?.addEventListener("click", () => openReportsFolder());
   document.querySelector("#createGitHubIssueButton")?.addEventListener("click", () => void createIssue());
   document.querySelector("#doneButton")?.addEventListener("click", () => {
     void closeReportFocus("Report closed. New captures will start a fresh report.");
@@ -528,6 +563,24 @@ async function downloadBundle(): Promise<void> {
   const url = URL.createObjectURL(zip);
   downloadDataUrl(`${basename}.zip`, url, true);
   await closeReportFocus("ZIP download started. Report closed.");
+}
+
+function openReportsFolder(): void {
+  if (chrome.downloads?.showDefaultFolder) {
+    chrome.downloads.showDefaultFolder();
+    statusMessage = "Opened the downloads folder.";
+  } else {
+    statusMessage = "Chrome downloads folder access is unavailable here.";
+  }
+  render();
+}
+
+function openDonatePage(): void {
+  if (chrome.tabs?.create) {
+    void chrome.tabs.create({ url: DONATE_URL });
+    return;
+  }
+  window.open(DONATE_URL, "_blank", "noopener");
 }
 
 function openEditor(screenshotId: string): void {

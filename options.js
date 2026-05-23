@@ -155,6 +155,7 @@ var settings = {};
 var message = "";
 var busy = false;
 var repos = [];
+var apiKeyVisible = false;
 void init();
 async function init() {
   settings = await getSettings();
@@ -166,74 +167,141 @@ async function init() {
 function render() {
   root.innerHTML = `
     <section class="shell options-shell">
-      <header class="topbar">
-        <div>
+      <header class="settings-nav">
+        <button class="brand-lockup" id="captureNavButton" title="Open capture">
+          <span class="nav-icon" aria-hidden="true">\u2637</span>
+          <span>BugReporter</span>
+        </button>
+        <button class="nav-gear" id="settingsNavButton" title="Settings" aria-label="Settings">\u2699</button>
+      </header>
+
+      <main class="settings-main">
+        <div class="page-heading">
           <p class="eyebrow">Screenshot2Bug</p>
           <h1>Settings</h1>
         </div>
-      </header>
 
-      ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
+        ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
 
-      <section class="panel">
-        <h2>AI reports</h2>
-        <label class="field">
-          <span>OpenAI API key</span>
-          <input id="apiKeyInput" type="password" value="${escapeHtml(settings.openaiApiKey ?? "")}" placeholder="sk-..." />
-        </label>
+        <section class="panel settings-card">
+          <div class="section-title">
+            <span class="section-icon" aria-hidden="true">\u2726</span>
+            <h2>AI reports</h2>
+          </div>
+          <label class="field">
+            <span>OpenAI API key</span>
+            <span class="input-shell">
+              <input id="apiKeyInput" type="${apiKeyVisible ? "text" : "password"}" value="${escapeHtml(settings.openaiApiKey ?? "")}" placeholder="sk-..." />
+              <button class="inline-icon-button" id="toggleApiKeyButton" type="button" title="${apiKeyVisible ? "Hide API key" : "Show API key"}" aria-label="${apiKeyVisible ? "Hide API key" : "Show API key"}">${apiKeyVisible ? "\u25CC" : "\u2301"}</button>
+            </span>
+          </label>
 
-        <label class="field">
-          <span>OpenAI model</span>
-          <input id="modelInput" type="text" value="${escapeHtml(settings.openaiModel ?? DEFAULT_MODEL)}" />
-        </label>
+          <label class="field">
+            <span>OpenAI model</span>
+            <input id="modelInput" type="text" value="${escapeHtml(settings.openaiModel ?? DEFAULT_MODEL)}" />
+          </label>
 
-        <button class="primary" id="saveAiButton">Save AI settings</button>
-      </section>
+          <button class="primary compact-action" id="saveAiButton">Save AI settings</button>
+        </section>
 
-      <section class="panel">
-        <h2>GitHub issues</h2>
-        <label class="field">
-          <span>GitHub OAuth Client ID</span>
-          <input id="githubClientIdInput" type="text" value="${escapeHtml(settings.githubClientId ?? "")}" placeholder="Public OAuth app client ID" />
-        </label>
+        <section class="panel settings-card">
+          <div class="section-title">
+            <span class="section-icon" aria-hidden="true">\u2318</span>
+            <h2>GitHub issues</h2>
+          </div>
+          <label class="field">
+            <span>GitHub OAuth Client ID</span>
+            <input id="githubClientIdInput" type="text" value="${escapeHtml(settings.githubClientId ?? "")}" placeholder="Public OAuth app client ID" />
+          </label>
 
-        <label class="field">
-          <span>Default labels</span>
-          <input id="githubLabelsInput" type="text" value="${escapeHtml((settings.githubDefaultLabels ?? ["bug"]).join(", "))}" placeholder="bug" />
-        </label>
+          <label class="field">
+            <span>Default labels</span>
+            <span class="label-input">
+              ${(settings.githubDefaultLabels ?? ["bug"]).map((label) => `<span class="label-chip">${escapeHtml(label)} <span aria-hidden="true">\xD7</span></span>`).join("")}
+              <input id="githubLabelsInput" type="text" value="" placeholder="Add label..." />
+            </span>
+          </label>
 
-        <div class="actions">
-          <button class="primary" id="connectGitHubButton" ${busy ? "disabled" : ""}>${settings.githubAccessToken ? "Reconnect GitHub" : "Connect GitHub"}</button>
-          <button id="disconnectGitHubButton" ${!settings.githubAccessToken || busy ? "disabled" : ""}>Disconnect</button>
-        </div>
+          <div class="actions">
+            <button class="primary" id="connectGitHubButton" ${busy ? "disabled" : ""}>${settings.githubAccessToken ? "Reconnect GitHub" : "Connect GitHub"}</button>
+            <button id="disconnectGitHubButton" ${!settings.githubAccessToken || busy ? "disabled" : ""}>Disconnect</button>
+          </div>
 
-        ${renderGitHubStatus()}
-      </section>
+          ${renderGitHubStatus()}
+        </section>
 
-      <section class="panel">
-        <h2>Image uploads</h2>
-        <label class="field">
-          <span>Cloudinary cloud name</span>
-          <input id="cloudinaryCloudNameInput" type="text" value="${escapeHtml(settings.cloudinaryCloudName ?? "")}" placeholder="your-cloud-name" />
-        </label>
+        <section class="panel settings-card">
+          <div class="section-title">
+            <span class="section-icon" aria-hidden="true">\u2601</span>
+            <h2>Image uploads</h2>
+          </div>
+          <label class="field">
+            <span>Cloudinary cloud name</span>
+            <input id="cloudinaryCloudNameInput" type="text" value="${escapeHtml(settings.cloudinaryCloudName ?? "")}" placeholder="your-cloud-name" />
+          </label>
 
-        <label class="field">
-          <span>Unsigned upload preset</span>
-          <input id="cloudinaryUploadPresetInput" type="text" value="${escapeHtml(settings.cloudinaryUploadPreset ?? "")}" placeholder="screenshot2bug" />
-        </label>
+          <label class="field">
+            <span>Unsigned upload preset</span>
+            <input id="cloudinaryUploadPresetInput" type="text" value="${escapeHtml(settings.cloudinaryUploadPreset ?? "")}" placeholder="screenshot2bug" />
+          </label>
 
-        <p class="muted">Screenshots upload to Cloudinary before GitHub issue creation. Use an unsigned preset with image uploads enabled.</p>
-        <button class="primary" id="saveCloudinaryButton">Save image upload settings</button>
-      </section>
+          <div class="hint-panel">
+            <p class="muted">Screenshots upload to Cloudinary before GitHub issue creation. Use an unsigned preset with image uploads enabled.</p>
+          </div>
+          <button class="primary compact-action" id="saveCloudinaryButton">Save image upload settings</button>
+        </section>
 
-      <section class="panel">
-        <h2>Shortcuts</h2>
-        <p class="muted">Defaults are Option+Shift+S for full-tab screenshots, Option+Shift+A for selected-area screenshots, Option+Shift+V for full-tab videos, and Option+Shift+R for selected-area videos. Chrome lets you remap them from the extensions shortcuts page.</p>
-        <button id="shortcutsButton">Open Chrome shortcuts</button>
-      </section>
+        <section class="panel settings-card">
+          <div class="section-title">
+            <span class="section-icon" aria-hidden="true">\u2328</span>
+            <h2>Shortcuts</h2>
+          </div>
+          <div class="shortcut-grid">
+            ${renderShortcut("Full screenshot", "Opt+Shift+S")}
+            ${renderShortcut("Area screenshot", "Opt+Shift+A")}
+            ${renderShortcut("Full video", "Opt+Shift+V")}
+            ${renderShortcut("Area video", "Opt+Shift+R")}
+          </div>
+          <p class="muted">Chrome lets you remap these shortcuts from the extensions shortcuts page.</p>
+          <button class="compact-action" id="shortcutsButton">Open Chrome shortcuts</button>
+        </section>
+
+        <section class="resource-grid">
+          <article class="docs-card">
+            <div>
+              <h2>Documentation</h2>
+              <p>Learn how to automate your bug reporting workflow.</p>
+            </div>
+          </article>
+          <article class="help-card">
+            <span aria-hidden="true">\u25B1</span>
+            <strong>Need Help?</strong>
+            <p>Join our Discord community for support.</p>
+          </article>
+        </section>
+      </main>
+
+      <footer class="bottom-nav" aria-label="Extension navigation">
+        <button id="bottomCaptureButton">
+          <span aria-hidden="true">\u2317</span>
+          <small>Capture</small>
+        </button>
+        <button id="bottomReportsButton">
+          <span aria-hidden="true">\u25A6</span>
+          <small>Reports</small>
+        </button>
+        <button class="active" id="bottomSettingsButton">
+          <span aria-hidden="true">\u2699</span>
+          <small>Settings</small>
+        </button>
+      </footer>
     </section>
   `;
   document.querySelector("#saveAiButton")?.addEventListener("click", () => void saveAi());
+  document.querySelector("#toggleApiKeyButton")?.addEventListener("click", () => {
+    apiKeyVisible = !apiKeyVisible;
+    render();
+  });
   document.querySelector("#saveCloudinaryButton")?.addEventListener("click", () => void saveCloudinary());
   document.querySelector("#connectGitHubButton")?.addEventListener("click", () => void connectGitHub());
   document.querySelector("#disconnectGitHubButton")?.addEventListener("click", () => void disconnectGitHub());
@@ -244,6 +312,9 @@ function render() {
   document.querySelector("#shortcutsButton")?.addEventListener("click", () => {
     void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
   });
+  document.querySelector("#captureNavButton")?.addEventListener("click", () => void openPopupPage());
+  document.querySelector("#bottomCaptureButton")?.addEventListener("click", () => void openPopupPage());
+  document.querySelector("#bottomReportsButton")?.addEventListener("click", () => void openPopupPage());
 }
 function renderGitHubStatus() {
   if (!settings.githubAccessToken) {
@@ -253,7 +324,7 @@ function renderGitHubStatus() {
     (repo) => `<option value="${escapeHtml(repo.fullName)}" ${repo.fullName === settings.githubSelectedRepo?.fullName ? "selected" : ""}>${escapeHtml(repo.fullName)}${repo.private ? " (private)" : ""}</option>`
   ).join("");
   return `
-    <p class="muted">Connected as <strong>${escapeHtml(settings.githubUserLogin ?? "GitHub user")}</strong>.</p>
+    <p class="connected-row"><span class="status-dot" aria-hidden="true"></span>Connected as <strong>${escapeHtml(settings.githubUserLogin ?? "GitHub user")}</strong></p>
     <label class="field">
       <span>Issue destination repository</span>
       <select id="repoSelect">
@@ -261,8 +332,23 @@ function renderGitHubStatus() {
         ${repoOptions}
       </select>
     </label>
-    <button id="refreshReposButton" ${busy ? "disabled" : ""}>Refresh repositories</button>
+    <button class="compact-action" id="refreshReposButton" ${busy ? "disabled" : ""}>Refresh repositories</button>
   `;
+}
+function renderShortcut(label, shortcut) {
+  return `
+    <article class="shortcut-card">
+      <span>${escapeHtml(label)}</span>
+      <code>${escapeHtml(shortcut)}</code>
+    </article>
+  `;
+}
+async function openPopupPage() {
+  if (chrome.action?.openPopup) {
+    await chrome.action.openPopup();
+    return;
+  }
+  await chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
 }
 async function saveAi() {
   const openaiApiKey = document.querySelector("#apiKeyInput")?.value.trim();
@@ -282,9 +368,8 @@ async function saveCloudinary() {
 }
 async function connectGitHub() {
   const githubClientId = document.querySelector("#githubClientIdInput")?.value.trim();
-  const githubDefaultLabels = parseLabels(
-    document.querySelector("#githubLabelsInput")?.value ?? "bug"
-  );
+  const labelInput = document.querySelector("#githubLabelsInput")?.value.trim();
+  const githubDefaultLabels = labelInput ? parseLabels(labelInput) : settings.githubDefaultLabels ?? ["bug"];
   if (!githubClientId) {
     message = "Add a GitHub OAuth Client ID first.";
     render();
